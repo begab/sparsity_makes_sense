@@ -1,0 +1,13 @@
+log
+plots
+models
+outputs
+representations
+WSD_Evaluation_Framework
+
+*.sh
+*.class
+*.pyc
+*.png
+*.pdf
+__pycache__
