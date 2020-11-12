@@ -6,7 +6,7 @@ If you would like to try out the model first, you can do so using [this demo](ht
 
 ## Cloning the repository
 ```bash
-git clone https://github.com/berend/sparsity_makes_sense.git
+git clone git@github.com:begab/sparsity_makes_sense.git
 cd sparsity_makes_sense
 pip install -r requirements.txt
 mkdir -p log/results
