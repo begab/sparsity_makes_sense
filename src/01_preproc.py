@@ -41,7 +41,7 @@ class Preprocessor(object):
                         self.vectors[layer_id] = []
                         self.need_to_open[layer_id] = True
                     self.vectors[layer_id].extend(embs)
-            if len(self.vectors[0]) > 100000:
+            if len(self.vectors[0]) > 20000:
                 self.dump_embeddings(out_file_prefix)
                 logging.info((i, len(self.vectors[0]), sequence))
             if i%5000==0: logging.info("{} sentences processed".format(i))
