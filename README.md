@@ -8,6 +8,8 @@ If you would like to try out the model first, you can do so using [this demo](ht
 ```bash
 git clone git@github.com:begab/sparsity_makes_sense.git
 cd sparsity_makes_sense
+# you might need to install certain libs previous to the pip install command
+# sudo apt -y install libblas-dev liblapack-dev gfortran
 pip install -r requirements.txt
 mkdir -p log/results
 ```
@@ -27,19 +29,19 @@ The next step is to obtain the dense contextualized representations using the [t
 TRANSFORMER_MODEL=bert-large-cased
 DATA_PATH=.
 
-nice -n3 python src/01_preproc.py --gpu_id 0 \
-                                  --transformer $TRANSFORMER_MODEL \
-                                  --reader SemcorReader \
-                                  --in_files ${DATA_PATH}/WSD_Evaluation_Framework/Training_Corpora/SemCor/semcor.data.xml \
-                                             ${DATA_PATH}/WSD_Evaluation_Framework/Evaluation_Datasets/ALL/ALL.data.xml \
-                                  --out_dir ${DATA_PATH}/representations > log/preproc_raganato.log 2>&1 &
+python src/01_preproc.py --gpu_id 0 \
+                         --transformer $TRANSFORMER_MODEL \
+                         --reader SemcorReader \
+                         --in_files ${DATA_PATH}/WSD_Evaluation_Framework/Training_Corpora/SemCor/semcor.data.xml \
+                                    ${DATA_PATH}/WSD_Evaluation_Framework/Evaluation_Datasets/ALL/ALL.data.xml \
+                         --out_dir ${DATA_PATH}/representations > log/preproc_raganato.log 2>&1 &
 
-nice -n3 python src/01_preproc.py --gpu_id 0 \
-                                  --transformer $TRANSFORMER_MODEL \
-                                  --reader WordNetReader \
-                                  --in_files WordNet \
-                                  --avg-seq \
-                                  --out_dir ${DATA_PATH}/representations > log/preproc_wordnet.log 2>&1 &
+python src/01_preproc.py --gpu_id 0 \
+                         --transformer $TRANSFORMER_MODEL \
+                         --reader WordNetReader \
+                         --in_files WordNet \
+                         --avg-seq \
+                         --out_dir ${DATA_PATH}/representations > log/preproc_wordnet.log 2>&1 &
 
 ```
 Optionally, one can use the WordNet Gloss Tagged corpus as additional training data. In order to do so, this corpus needs to be preprocessed first as well:
