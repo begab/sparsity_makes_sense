@@ -5,6 +5,7 @@ outputs
 representations
 WSD_Evaluation_Framework
 
+*.log
 *.sh
 *.class
 *.pyc

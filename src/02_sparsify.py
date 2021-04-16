@@ -19,7 +19,7 @@ logging.config.dictConfig({
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Creates sparse contextualized representation.')
-    parser.add_argument('--in_files', nargs='+') # it is assumed that the first file is used to determine matrix D
+    parser.add_argument('--in_files', nargs='+', required=True) # it is assumed that the first file is used to determine matrix D
 
     parser.add_argument('--K', type=int, default=2000)
     parser.add_argument('--lda', type=float, default=0.05)
@@ -33,7 +33,7 @@ if __name__ == '__main__':
 
     logging.info(args)
 
-    params = {'K': args.K, 'lambda1': args.lda, 'numThreads': 8, 'batchsize': 400, 'iter': 1000, 'verbose': False, 'posAlpha': True}
+    params = {'K': args.K, 'lambda1': args.lda, 'numThreads': 8, 'iter': 1000, 'batchsize': 400, 'posAlpha': True, 'verbose': False}
     lasso_params = {x:params[x] for x in ['L','lambda1','lambda2','mode','pos','ols','numThreads','length_path','verbose'] if x in params}
     lasso_params['pos'] = True
     dict_file = args.predefined_dictionary_file # when follows random:x pattern, the dictionary is randomly generated using seed x
