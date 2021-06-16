@@ -115,6 +115,31 @@ We obtained the below results when applying sparse contextualized word represent
 |SemCor + WordNet |77.9 | 77.8 | 68.8 | 76.1 | 77.5 |76.8| 
 |SemCor + WordNet + WNGC | 79.6 | 77.3 | 73.0 | 79.4 | 81.3 | 78.8 |
 
+### Multilingual results on XL-WSD
+Evaluation results on the [Extra-Large and Cross-Lingual Evaluation Framework for Word Sense Disambiguation](https://sapienzanlp.github.io/xl-wsd/) (XL-WSD) dataset.
+
+|language| XLMR-Large | sparse XLMR-Large |
+|----|---|---|
+|BG|__72.00__|70.62|
+|CA|49.97|__50.85__|
+|DA|80.61|__81.13__|
+|DE|83.18|__84.92__|
+|EN|__76.28__|74.76|
+|ES|75.85|__76.88__|
+|ET|66.13|__69.33__|
+|EU|__47.15__|46.71|
+|FR|__83.88__|81.81|
+|GL|__66.28__|65.33|
+|HR|72.29|__72.71__|
+|HU|67.64|__69.76__|
+|IT|77.66|__78.49__|
+|JA|61.87|__63.33__|
+|KO|__64.20__|63.62|
+|NL|59.20|__60.05__|
+|SL|68.36|__68.41__|
+|ZH|51.62|__53.77__|
+|avg.|66.82|__68.47__|
+|avg-EN|65.66|__68.10__|
 
 ## How to cite?
 ```
