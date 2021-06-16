@@ -89,7 +89,7 @@ class SeqReader(object):
 
     def get_representation(self, orig_to_tok_map, indexed_tokens_with_specials, average):
         with torch.no_grad():
-            vecs = self.model(torch.tensor([indexed_tokens_with_specials]).to(self.device))[-1]
+            vecs = self.model(torch.tensor([indexed_tokens_with_specials]).to(self.device))['hidden_states']
 
         per_layer_embeddings = []
         for emb in vecs:
