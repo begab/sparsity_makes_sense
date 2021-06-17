@@ -138,8 +138,8 @@ Evaluation results on the [Extra-Large and Cross-Lingual Evaluation Framework fo
 |NL|59.20|__60.05__|
 |SL|68.36|__68.41__|
 |ZH|51.62|__53.77__|
-|avg.|66.82|__68.47__|
-|avg-EN|65.66|__68.10__|
+|micro avg.|66.82|__67.21__|
+|micro avg-EN|65.66|__66.28__|
 
 ## How to cite?
 ```
