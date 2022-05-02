@@ -4,7 +4,7 @@ import pickle
 import subprocess
 from utils.readers import *
 from utils.evaluate_answers import parse_file, evaluate
-from utils.utils import row_normalize, get_synsets
+from utils.utils import row_normalize, get_synsets, create_batch
 
 import numpy as np
 import scipy.sparse
@@ -149,12 +149,19 @@ def main():
     parser.add_argument('--eval_repr', type=str, required=True)
     parser.add_argument('--eval_dir', type=str)
     parser.add_argument('--dictionary_file', type=str)
+    parser.add_argument('--xling_mapping_file', type=str)
     parser.add_argument('--inventory_file', type=str, default='/Data_Validation/candidatesWN30.txt')
+    parser.add_argument('--lda', type=float, default=0.05)
 
     parser.add_argument('--reduced', dest='reduced', action='store_true', help='Use it if the input matrix contains embeddings for the labeled words only')
     parser.add_argument('--not-reduced', dest='reduced', action='store_false')
     parser.set_defaults(reduced=False)
- 
+
+    parser.add_argument('--gpu_id', type=int, default=0)
+
+    parser.add_argument('--use-spams', dest='spams', action='store_true')
+    parser.add_argument('--not-spams', dest='spams', action='store_false')
+    parser.set_defaults(spams=False)
 
     parser.add_argument('--batch_experiment', dest='single_experiment', action='store_false')
     parser.set_defaults(single_experiment=True)
@@ -179,8 +186,15 @@ def main():
     parser.add_argument('--babelnet', dest='use_pwn', action='store_false')
     parser.set_defaults(use_pwn=True)
 
+    parser.add_argument('--pred_file_location', default=None, help='Path to save the output')
+
 
     args = parser.parse_args()
+    if args.spams==True:
+        import spams
+    else:
+        import torch
+        from utils.sparser import FISTA 
 
     klass = globals()[args.reader]
     reader = klass()
@@ -210,6 +224,38 @@ def main():
     #logging.info((len(labels_to_vecs), len(labels_to_freq), labels_to_freq[0:10], mtx.shape, model_name))
 
     D = np.load(args.dictionary_file) if args.dictionary_file else None
+    if D is not None and args.spams == False:
+        device = torch.device("cuda:{}".format(args.gpu_id)) if torch.cuda.is_available() else torch.device("cpu")
+        D = torch.from_numpy(D).to(device)
+
+    if args.eval_repr.endswith('npy'):
+        R = np.load(args.eval_repr)
+        trafo = None
+        if args.xling_mapping_file is not None:
+            trafo = np.load(args.xling_mapping_file)
+            R = np.hstack([row_normalize(R),
+                           np.zeros((R.shape[0], max(0, trafo.shape[0] - R.shape[1])))
+                           ])
+            R = (R @ trafo).astype(np.float32)
+
+        if D is not None:
+            R = np.asfortranarray(row_normalize(R).T)
+            if args.spams:
+                if not np.isfortran(D):
+                    D=np.asfortranarray(D)
+                R = spams.lasso(R, D=D, lambda1=args.lda, numThreads=8, pos=True)
+                R = R.T
+            else:
+                alphas = []
+                for batch in create_batch(R, 4096):
+                    ahat, _ = FISTA(torch.from_numpy(batch).to(device), D, args.lda, 100)
+                    alphas.append(scipy.sparse.csc_matrix(ahat.detach().cpu().numpy()))
+                R = scipy.sparse.hstack(alphas).T
+
+    elif args.eval_repr.endswith('npz'):
+        R = scipy.sparse.load_npz(args.eval_repr)
+        if D is not None:
+            R = R @ D.T
 
     for b1,b2,b3 in itertools.product([True, False], repeat=3):
         if args.single_experiment and (b1 != args.use_pmi or b2 != args.nonneg_pmi or b3 != args.normalize_pmi):
@@ -231,13 +277,6 @@ def main():
                     subprocess.run(["javac", "{}/Evaluation_Datasets/Scorer.java".format(args.eval_dir)])
             ev_dir = args.eval_dir
             ev.get_sense_inventory('{}/{}'.format(ev_dir, args.inventory_file), args.use_pwn)
-
-        if args.eval_repr.endswith('npy'):
-            R = np.load(args.eval_repr)
-        elif args.eval_repr.endswith('npz'):
-            R = scipy.sparse.load_npz(args.eval_repr)
-            if D is not None:
-                R = R @ D.T
 
         predictions = {}
         ids, preds, expected = [], [], []
@@ -280,8 +319,10 @@ def main():
             preds.append(possible_labels[np.argmax(scores)])
             predictions[token_id] = set([preds[-1]])
 
-        with open('./outputs/{}_{}.out'.format('_'.join(map(str, params)), np.abs(hash(model_name))), 'w') as fo:
-            fo.write('\n'.join(preds))
+        #pred_file = args.pred_file_location if args.pred_file_location is not None else np.abs(hash(model_name))
+        if args.pred_file_location is not None:
+            with open('./outputs/{}_{}.out'.format('_'.join(map(str, params)), args.pred_file_location), 'w') as fo:
+                fo.write('\n'.join(preds))
 
         if args.reader == 'SemcorReader':
             if args.use_pwn:

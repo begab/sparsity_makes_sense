@@ -1,6 +1,6 @@
 import torch
 import numpy as np
-from transformers import AutoConfig, AutoModel, AutoTokenizer
+from transformers import AutoConfig, AutoModel, AutoTokenizer, AutoModelForMaskedLM
 
 from nltk import word_tokenize
 from nltk.corpus import wordnet as wn
@@ -26,26 +26,29 @@ logging.config.dictConfig({
 
 class SeqReader(object):
 
-    def __init__(self, transformer=None, gpu=0, pooling='mean'):
+    def __init__(self, transformer=None, gpu=0, pooling='mean', mlm=False):
         self.transformer_model = transformer
         self.pooling_strategy = pooling
         if transformer is not None:
-            self.tokenizer, self.model = self.load_transformer(transformer, gpu)
+            self.tokenizer, self.model = self.load_transformer(transformer, gpu, mlm)
 
     def set_device(self, device_id):
         device_count = torch.cuda.device_count()
-        if device_count != 0:
-            if device_id < 0 or device_id >= device_count:
-                device_id = random.randint(1, device_count) - 1
+        if device_count != 0 and device_id >= 0:
+            if device_id >= device_count:
+                device_id = np.random.randint(device_count)
             self.device = torch.device('cuda:{}'.format(device_id))
         else:
             self.device = torch.device('cpu')
 
-    def load_transformer(self, transformer, gpu_id):
+    def load_transformer(self, transformer, gpu_id, mlm=False):
         self.set_device(gpu_id)
         conf = AutoConfig.from_pretrained(transformer, output_hidden_states=True)
-        tokenizer = AutoTokenizer.from_pretrained(transformer)
-        model = AutoModel.from_pretrained(transformer, config=conf)
+        tokenizer = AutoTokenizer.from_pretrained(transformer, use_fast=transformer!='EMBEDDIA/sloberta')
+        if mlm:
+            model = AutoModelForMaskedLM.from_pretrained(transformer, config=conf)
+        else:
+            model = AutoModel.from_pretrained(transformer, config=conf)
         model.to(self.device)
         return tokenizer, model
 
@@ -69,9 +72,9 @@ class SeqReader(object):
 
     def tokenize_sequence(self, sequence):
         orig_to_tok_map, transformer_tokens = [], []
-        for orig_token in sequence:
+        for tok_pos, orig_token in enumerate(sequence):
             orig_to_tok_map.append(len(transformer_tokens))
-            transformer_tokens.extend(self.tokenizer.tokenize(orig_token))
+            transformer_tokens.extend(self.tokenizer.tokenize('{}{}'.format(' ' if tok_pos>0 else '', orig_token)))
 
         orig_to_tok_map.append(len(transformer_tokens))
 

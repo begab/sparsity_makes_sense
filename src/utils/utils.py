@@ -17,6 +17,11 @@ except:
     import nltk
     nltk.download('punkt')
 
+def create_batch(vecs, batch_size=8192):
+    l = vecs.shape[1]
+    for ndx in range(0, l, batch_size):
+        yield vecs[:, ndx:min(ndx + batch_size, l)]
+
 def row_normalize(embeddings):
     row_norms = np.sqrt((embeddings**2).sum(axis=1))[:, np.newaxis]
     row_norms[row_norms==0] = 1 # we do not want to divide by 0

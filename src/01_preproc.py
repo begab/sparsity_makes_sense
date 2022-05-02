@@ -117,7 +117,7 @@ if __name__ == '__main__':
     parser.add_argument('--layers', nargs='+', default=None, type=int, help='Which layers of the model to save for later computation.')
     args = parser.parse_args()
 
-    dirname = os.path.dirname('{}/{}_{}/{}/'.format(args.out_dir, args.transformer.split('/')[-1], 'reduced' if args.reduced else 'full', args.pooling))
+    dirname = os.path.dirname('{}/{}_{}/{}/'.format(args.out_dir, args.transformer.replace('/', '_'), 'reduced' if args.reduced else 'full', args.pooling))
     if not os.path.isdir(dirname):
         os.makedirs(dirname)
         logging.info('{} created'.format(dirname))
@@ -137,7 +137,5 @@ if __name__ == '__main__':
                     U, sigmas, _ = np.linalg.svd(np.cov(X.T))
                     zca_trafo = U @ np.diag(1/np.sqrt(sigmas + 1e-7)) @ U.T
                     X_whitened = X @ zca_trafo
-                    logging.info(np.sum((X_whitened.T @ X_whitened) / X.shape[0]))
-                    logging.info((fn, np.sum(np.diag((X_whitened.T @ X_whitened) / X.shape[0]))))
                     np.save('{}_zca'.format(fn), np.vstack((mu, zca_trafo)))
 

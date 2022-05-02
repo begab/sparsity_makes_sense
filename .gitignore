@@ -4,7 +4,10 @@ models
 outputs
 representations
 WSD_Evaluation_Framework
+utils_src
 
+*.swp
+*.mod
 *.log
 *.sh
 *.class
