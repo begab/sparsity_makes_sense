@@ -55,6 +55,9 @@ python src/01_preproc.py --gpu_id 0 \
 ```
 
 ### Creation of the sparse contextualized vectors
+
+This command creates the dictionary matrix and the sparse representations averaged over the last 4 layers of the hidden representations of the transformer architecture:
+
 ```bash
 LAYER=21-22-23-24
 K=3000
@@ -64,6 +67,8 @@ python src/02_sparsify.py --in_files ${DATA_PATH}/representations/${TRANSFORMER_
                                      ${DATA_PATH}/representations/${TRANSFORMER_MODEL}/WordNet_${TRANSFORMER_MODEL}_avg_True_layer_${LAYER}.npy \
                           --K $K --lda $LAMBDA --normalize >> log/sparsify.log 2>&1 ;
 ```
+
+Optionally, the dictionary matrices used in the NAACL 2022 publication can be accessed from [this link](https://zenodo.org/record/6535075).
 
 ### Calculate the statistics for the model
 In order to calculate the affinity map ![formula](https://render.githubusercontent.com/render/math?math=\Phi) based on the sense annotated SemCor dataset and the WordNet glosses (similar to [LMMS](https://github.com/danlou/LMMS)), invoke
