@@ -17,9 +17,9 @@ logging.config.dictConfig({
 
 class Preprocessor(object):
 
-    def __init__(self, dataset_reader, transformer, gpu, pooling):
+    def __init__(self, dataset_reader, transformer, tokenizer_id, gpu, pooling, mlm):
         klass = globals()[dataset_reader]
-        self.reader = klass(transformer, gpu, pooling)
+        self.reader = klass(transformer, tokenizer_id, gpu, pooling, mlm)
         self.transformer_model = transformer.split('/')[-1]
 
 
@@ -96,12 +96,17 @@ class Preprocessor(object):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Determines contextualized representation for sequences in a flexible manner.')
     parser.add_argument('--transformer', required=True)
+    parser.add_argument('--tokenizer', required=False)
     parser.add_argument('--gpu_id', type=int, default=0)
     parser.add_argument('--reader')
     parser.add_argument('--in_files', nargs='+')
     parser.add_argument('--out_dir', default='./representations/')
     parser.add_argument('--pooling', default='mean', choices='mean-first-last-norm'.split('-'))
 
+    parser.add_argument('--mlm', dest='mlm', action='store_true')
+    parser.add_argument('--no-mlm', dest='mlm', action='store_false')
+    parser.set_defaults(mlm=False) # whether to use the logit (probabilities) or the hidden states
+    
     parser.add_argument('--zca', dest='zca', action='store_true')
     parser.add_argument('--no-zca', dest='zca', action='store_false')
     parser.set_defaults(zca=False) # whether decorrelation to be performed
@@ -117,6 +122,9 @@ if __name__ == '__main__':
     parser.add_argument('--layers', nargs='+', default=None, type=int, help='Which layers of the model to save for later computation.')
     args = parser.parse_args()
 
+    if args.tokenizer is None:
+        args.tokenizer = args.transformer
+
     dirname = os.path.dirname('{}/{}_{}/{}/'.format(args.out_dir, args.transformer.replace('/', '_'), 'reduced' if args.reduced else 'full', args.pooling))
     if not os.path.isdir(dirname):
         os.makedirs(dirname)
@@ -124,7 +132,7 @@ if __name__ == '__main__':
 
     logging.info(args)
 
-    p = Preprocessor(args.reader, args.transformer, args.gpu_id, args.pooling)
+    p = Preprocessor(args.reader, args.transformer, args.tokenizer, args.gpu_id, args.pooling, args.mlm)
     for i,f in enumerate(args.in_files):
         file_names = p.extract_embeddings(f, dirname, average=args.average, reduced=args.reduced, layers=args.layers)
 

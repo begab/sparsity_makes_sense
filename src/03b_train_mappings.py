@@ -24,8 +24,8 @@ logging.config.dictConfig({
 })
 
 def getknn(sc, x, y, k=10):
-    if type(sc) == torch.tensor:
-        top_vals, sidx = sc.topk(top_k, dim=1, largest=True)
+    if type(sc) == torch.Tensor:
+        top_vals, sidx = sc.topk(k, dim=1, largest=True)
         f = top_vals.sum()
         ytopk = y[sidx.flatten(), :].reshape(sidx.shape[0], sidx.shape[1], y.shape[1])
         df = torch.sum(ytopk, dim=1).T @ x
@@ -75,7 +75,7 @@ def calculate_rcsls(R, tgt, src, spectral, batchsize=0, niter=10, knn=10, maxneg
 
 def main():
 
-    parser = argparse.ArgumentParser(description='Performs WSD model training.')
+    parser = argparse.ArgumentParser(description='Calculates mappings between hidden states.')
 
     parser.add_argument('--src_transformer', default='bert-large-cased')
     parser.add_argument('--tgt_transformer')
@@ -104,14 +104,15 @@ def main():
     if not os.path.exists(out_dir_name):
         os.makedirs(out_dir_name)
 
-    out_file = '{}/{}_{}/{}_{}.pkl'.format(args.out_dir, args.src_pooling, args.tgt_pooling, args.src_transformer.replace('/','_'), args.tgt_transformer.replace('/','_'))
-
     threshold = 25000
+    args.out_dir += '-pt' if args.pt else ''
+    out_file = '{}/{}-{}/{}_{}'.format(args.out_dir, args.src_pooling, args.tgt_pooling, args.src_transformer.replace('/','_'), args.tgt_transformer.replace('/','_'))
+
     if os.path.exists(out_file):
         X,Y,x,y = pickle.load(open(out_file, 'rb'))
     else:
-        readers = {args.src_lang: SeqReader(args.src_transformer, np.abs(args.gpu_id), args.src_pooling),
-                   args.tgt_lang: SeqReader(args.tgt_transformer, np.abs(args.gpu_id), args.tgt_pooling)}
+        readers = {args.src_lang: SeqReader(args.src_transformer, args.src_transformer, np.abs(args.gpu_id), args.src_pooling),
+                   args.tgt_lang: SeqReader(args.tgt_transformer, args.tgt_transformer, np.abs(args.gpu_id), args.tgt_pooling)}
 
         tatoeba_src_lang = args.src_lang if args.src_lang != 'zh' else 'cmn'
         tatoeba_tgt_lang = args.tgt_lang if args.tgt_lang != 'zh' else 'cmn'
@@ -161,9 +162,10 @@ def main():
                           x.append(tok)
                           y.append(translation)
     
-        #with open(out_file, 'wb') as fo:
-        #    pickle.dump((X,Y,x,y), fo)
+        with open('{}-{}.pkl'.format(out_file, len(x)), 'wb') as fo:
+            pickle.dump((X,Y,x,y), fo)
 
+    #sys.exit(2)
     for layer in X:
         X[layer] = X[layer][:threshold]
     for layer in Y:
@@ -180,17 +182,19 @@ def main():
             tgt = np.hstack([np.array(Y_emb),
                              np.zeros((len(Y_emb),  X_emb[0].shape[0] - Y_emb[0].shape[0]))])
             src = np.array(X_emb)
+            tgt_mean = np.mean(tgt[:limit], axis=0)
+            src_mean = np.mean(src[:limit], axis=0)
             if args.center:
-                tgt -= np.mean(tgt[:limit], axis=0)
-                src -= np.mean(src[:limit], axis=0)
+                tgt -= tgt_mean
+                src -= src_mean
             tgt = row_normalize(tgt)
             src = row_normalize(src)
             tgt = np.array([tgt[p] for p in permutation])
             src = np.array([src[p] for p in permutation])
 
             if args.pt == True:
-                src = torch.tensor(src).to('cuda:{}'.format(args.gpu_id))
-                tgt = torch.tensor(tgt).to('cuda:{}'.format(args.gpu_id))
+                src = torch.tensor(src).float().to('cuda:{}'.format(args.gpu_id))
+                tgt = torch.tensor(tgt).float().to('cuda:{}'.format(args.gpu_id))
                 U, _, V = torch.linalg.svd(src[0:limit].T@tgt[0:limit])
             else:            
                 U, _, V = np.linalg.svd(src[0:limit].T@tgt[0:limit])
@@ -204,22 +208,25 @@ def main():
 
             for method, trafo in zip(['isometric', 'rcsls', 'identity'], [isometric_trafo, rcsls_trafo, identity_trafo]):
                 if trafo is None: continue
-                if trafo == torch.tensor:
+                if type(trafo) == torch.Tensor:
                     trafo = trafo.cpu().numpy()
  
-                trafo_file = '{}{}/{}-{}/{}_{}_{}_{}_{}_{}'.format(args.out_dir, '-pt' if args.pt else '', args.src_pooling, args.tgt_pooling, method, args.src_transformer.replace('/','_'), l1, args.tgt_transformer.replace('/','_'), l2, limit)
+                trafo_file = '{}/{}-{}/{}_{}_{}_{}_{}_{}'.format(args.out_dir, args.src_pooling, args.tgt_pooling, method, args.src_transformer.replace('/','_'), l1, args.tgt_transformer.replace('/','_'), l2, limit)
                 if method != 'identity':
-                    np.save(trafo_file, trafo)
+                    #np.save(trafo_file, trafo)
+                    with open(trafo_file, 'wb') as fo:
+                        pickle.dump((trafo, tgt_mean, src_mean), fo)
                 cka = feature_space_linear_cka(src[limit:], (tgt @ trafo)[limit:])
                 sims = cosine_distances(src[limit:], (tgt @ trafo)[limit:])
+                diff = np.linalg.norm(src[limit:] - (tgt @ trafo)[limit:])
                 s = np.argsort(sims, axis=1)
                 avg_sims = np.mean(sims)
-                for topk in [1, 5, 10, 15]:
+                for topk in [1]:#, 5, 10, 15]:
                     accuracy = sum([1 if i in set(j) else 0 for i,j in enumerate(s[:,0:topk])]) / (len(x)-limit)
                     # accuracy2 is more permissive as returning any sentence with the etalon translation is counted as a correct mapping
                     accuracy2 = sum([1 if x[i] in set([x[jj] for jj in j]) else 0 for i,j in enumerate(s[:,0:topk])])/(len(x)-limit)
                     top_sims_avg = np.mean([sims[row, s[row, -top-1]] for row in range(sims.shape[0]) for top in range(topk)])
-                    logging.info("{}-{}-{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{:.3f}\t{:.3f}\t{:.3f}\t{:.3f}\t{:.3f}".format(method, args.src_pooling, args.tgt_pooling, args.src_lang, args.tgt_lang, args.src_transformer, args.tgt_transformer, l1, l2, limit, len(x) - limit, topk, accuracy, accuracy2, top_sims_avg, avg_sims, cka))
+                    logging.info("{}-{}-{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{:.3f}\t{:.3f}\t{:.3f}\t{:.3f}\t{:.3f}".format(method, args.src_pooling, args.tgt_pooling, args.src_lang, args.tgt_lang, args.src_transformer, args.tgt_transformer, l1, l2, limit, len(x) - limit, topk, accuracy, accuracy2, top_sims_avg, avg_sims, diff))
 
 if __name__ == '__main__':
     main()

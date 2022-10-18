@@ -26,11 +26,12 @@ logging.config.dictConfig({
 
 class SeqReader(object):
 
-    def __init__(self, transformer=None, gpu=0, pooling='mean', mlm=False):
+    def __init__(self, transformer=None, tokenizer_id=None, gpu=0, pooling='mean', mlm=False):
         self.transformer_model = transformer
         self.pooling_strategy = pooling
+        self.mlm = mlm
         if transformer is not None:
-            self.tokenizer, self.model = self.load_transformer(transformer, gpu, mlm)
+            self.tokenizer, self.model = self.load_transformer(transformer, tokenizer_id, gpu, mlm)
 
     def set_device(self, device_id):
         device_count = torch.cuda.device_count()
@@ -41,10 +42,10 @@ class SeqReader(object):
         else:
             self.device = torch.device('cpu')
 
-    def load_transformer(self, transformer, gpu_id, mlm=False):
+    def load_transformer(self, transformer, tokenizer_id, gpu_id, mlm=False):
         self.set_device(gpu_id)
         conf = AutoConfig.from_pretrained(transformer, output_hidden_states=True)
-        tokenizer = AutoTokenizer.from_pretrained(transformer, use_fast=transformer!='EMBEDDIA/sloberta')
+        tokenizer = AutoTokenizer.from_pretrained(tokenizer_id, use_fast=transformer!='EMBEDDIA/sloberta')
         if mlm:
             model = AutoModelForMaskedLM.from_pretrained(transformer, config=conf)
         else:
@@ -92,10 +93,17 @@ class SeqReader(object):
 
     def get_representation(self, orig_to_tok_map, indexed_tokens_with_specials, average):
         with torch.no_grad():
-            vecs = self.model(torch.tensor([indexed_tokens_with_specials]).to(self.device))['hidden_states']
+            output = self.model(torch.tensor([indexed_tokens_with_specials]).to(self.device))
+            if self.mlm:
+                extra_symbols = self.model.base_model.embeddings.word_embeddings.weight.shape[0] - len(self.tokenizer)
+                vecs = torch.nn.functional.softmax(output['logits'][:,:,-extra_symbols:], dim=-1)
+            else:
+                vecs = output['hidden_states']
 
         per_layer_embeddings = []
         for emb in vecs:
+            if self.mlm:
+                emb = emb.unsqueeze(0)
             if average:
                 averaged = torch.mean(emb[0], dim=0).detach().cpu().numpy().reshape(1,-1)
                 per_layer_embeddings.append(averaged)
