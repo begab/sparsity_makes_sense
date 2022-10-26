@@ -100,13 +100,13 @@ def main():
     args = parser.parse_args()
 
     #logging.info(args)
-    out_dir_name = os.path.dirname(args.out_dir)
+    out_dir = '{}{}/{}-{}/'.format(args.out_dir, '-pt' if args.pt else '', args.src_pooling, args.tgt_pooling)
+    out_dir_name = os.path.dirname(out_dir)
     if not os.path.exists(out_dir_name):
         os.makedirs(out_dir_name)
 
     threshold = 25000
-    args.out_dir += '-pt' if args.pt else ''
-    out_file = '{}/{}-{}/{}_{}'.format(args.out_dir, args.src_pooling, args.tgt_pooling, args.src_transformer.replace('/','_'), args.tgt_transformer.replace('/','_'))
+    out_file = '{}/{}_{}'.format(out_dir, args.src_transformer.replace('/','_'), args.tgt_transformer.replace('/','_'))
 
     if os.path.exists(out_file):
         X,Y,x,y = pickle.load(open(out_file, 'rb'))
@@ -114,8 +114,17 @@ def main():
         readers = {args.src_lang: SeqReader(args.src_transformer, args.src_transformer, np.abs(args.gpu_id), args.src_pooling),
                    args.tgt_lang: SeqReader(args.tgt_transformer, args.tgt_transformer, np.abs(args.gpu_id), args.tgt_pooling)}
 
-        tatoeba_src_lang = args.src_lang if args.src_lang != 'zh' else 'cmn'
-        tatoeba_tgt_lang = args.tgt_lang if args.tgt_lang != 'zh' else 'cmn'
+        tatoeba_src_lang = args.src_lang.lower()
+        if tatoeba_src_lang == 'zh':
+            tatoeba_src_lang = 'cmn'
+        elif tatoeba_src_lang == 'fa':
+            tatoeba_src_lang = 'pes'
+        tatoeba_tgt_lang = args.tgt_lang.lower()
+        if tatoeba_tgt_lang == 'zh':
+            tatoeba_tgt_lang = 'cmn'
+        elif tatoeba_tgt_lang == 'fa':
+            tatoeba_tgt_lang = 'pes'
+
         w2w_src_lang = args.src_lang if args.src_lang != 'zh' else 'zh_cn'
         w2w_tgt_lang = args.tgt_lang if args.tgt_lang != 'zh' else 'zh_cn'
         tatoeba = datasets.load_dataset("tatoeba", lang1=min(tatoeba_src_lang, tatoeba_tgt_lang), lang2=max(tatoeba_src_lang, tatoeba_tgt_lang))
@@ -144,7 +153,10 @@ def main():
             token_mappings = {l:{} for l in readers}
             vecs = {l:{} for l in readers}
             for (lang, sent) in tr.items():
-                lang = 'zh' if lang=='cmn' else lang
+                if lang=='cmn':
+                    lang='zh'
+                elif lang=='pes':
+                    lang='fa'
                 sent_toks = word2word.tokenization.word_segment(sent, lang if lang!='zh' else 'zh_cn', tokenizers[lang])
                 orig_to_tok_map, indexed_tokens_with_specials = readers[lang].tokenize_sequence(sent_toks)
                 token_mappings[lang] = {t:i for i,t in enumerate(sent_toks)}
@@ -211,7 +223,7 @@ def main():
                 if type(trafo) == torch.Tensor:
                     trafo = trafo.cpu().numpy()
  
-                trafo_file = '{}/{}-{}/{}_{}_{}_{}_{}_{}'.format(args.out_dir, args.src_pooling, args.tgt_pooling, method, args.src_transformer.replace('/','_'), l1, args.tgt_transformer.replace('/','_'), l2, limit)
+                trafo_file = '{}/{}_{}_{}_{}_{}_{}'.format(out_dir, method, args.src_transformer.replace('/','_'), l1, args.tgt_transformer.replace('/','_'), l2, limit)
                 if method != 'identity':
                     #np.save(trafo_file, trafo)
                     with open(trafo_file, 'wb') as fo:
