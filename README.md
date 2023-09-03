@@ -3,7 +3,7 @@ This repo contains the code base for reproducing the experiments included in the
 * [Combating the Curse of Multilinguality in Cross-Lingual WSD by Aligning Sparse Contextualized Word Representations](https://aclanthology.org/2022.naacl-main.176/)
 * [Sparsity Makes Sense: Word Sense Disambiguation Using Sparse Contextualized Word Representations](https://www.aclweb.org/anthology/2020.emnlp-main.683/)
 
-If you would like to try out the model first, you can do so using [this demo](http://www.inf.u-szeged.hu/~berendg/nlp_demos//wsd).
+If you would like to try out the model first, you can do so using [this demo](https://www.inf.u-szeged.hu/~berendg/nlp_demos//wsd).
 
 ## Cloning the repository
 ```bash
