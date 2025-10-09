@@ -94,7 +94,7 @@ def main():
                     indptrs.append(len(data))
                     if sid % 2500 == 0:
                         logging.info((sid, len(data), len(indptrs)))
-                M = scipy.sparse.csc_matrix((data, indices, indptrs), shape=(num_samples, num_atoms **2))
+                M = scipy.sparse.csr_matrix((data, indices, indptrs), shape=(num_samples, num_atoms **2))
 
         elif rep.endswith('.npy'):
             M = np.load(rep)
