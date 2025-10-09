@@ -36,6 +36,10 @@ def main():
     parser.add_argument('--not-reduced', dest='reduced', action='store_false')
     parser.set_defaults(reduced=False)
 
+    parser.add_argument('--pairs', dest='pairs', action='store_true', help='Whether to use sparse atom pairs')
+    parser.add_argument('--no-pairs', dest='pairs', action='store_false')
+    parser.set_defaults(pairs=False)
+
     parser.add_argument('--lexname', dest='senseid', action='store_false')
     parser.add_argument('--senseid', dest='senseid', action='store_true')
     parser.set_defaults(senseid=True)
@@ -51,15 +55,15 @@ def main():
         sys.exit(2)
 
     logging.info(args)
-    out_dir_name = os.path.dirname(args.out_dir)
-    if not os.path.exists(out_dir_name):
-        os.makedirs(out_dir_name)
+    #out_dir_name = os.path.dirname(args.out_dir)
+    if not os.path.exists(args.out_dir):
+        os.makedirs(args.out_dir)
 
     D = np.load(args.dictionary_file) if args.dictionary_file else None
     for r, inp, rep in zip(args.readers, args.in_files, args.representations):
         logging.info(r)
         if (r!="WordNetReader" and not os.path.exists(inp)) or not os.path.exists(rep):
-            logging.warning('Either of the files {} or {} does not exist'.format(inp, rep))
+            logging.warning(f'Either of the files {inp} or {rep} does not exist')
             continue
 
         labels_to_freq = []
@@ -70,8 +74,28 @@ def main():
 
         if rep.endswith('.npz'):
             M = scipy.sparse.load_npz(rep)
+            logging.info(M.shape)
             if D is not None:
                 M = M @ D.T
+            elif D is None and args.pairs:
+                data, indices, indptrs = [], [], [0]
+                M.data = np.ones_like(M.data)
+                num_samples, num_atoms = M.shape
+                for sid in range(num_samples):
+                    coocc = M[sid].T @ M[sid]
+                    new_data, new_indices = [], []
+                    for row_id, (from_idx, to_idx) in enumerate(zip(coocc.indptr, coocc.indptr[1:])):
+                        for val, ind in zip(coocc.data[from_idx:to_idx], coocc.indices[from_idx:to_idx]):
+                            if ind >= row_id:
+                                new_data.append(val)
+                                new_indices.append(row_id *  num_atoms + ind)
+                    data.extend(new_data)
+                    indices.extend(new_indices)
+                    indptrs.append(len(data))
+                    if sid % 2500 == 0:
+                        logging.info((sid, len(data), len(indptrs)))
+                M = scipy.sparse.csc_matrix((data, indices, indptrs), shape=(num_samples, num_atoms **2))
+
         elif rep.endswith('.npy'):
             M = np.load(rep)
 
@@ -100,7 +124,7 @@ def main():
                     labels_to_freq[labels_to_ids[label]] += 1
                     labels_to_vecs[labels_to_ids[label]] += vec
 
-            if idx%150000==0: logging.info('{} tokens processed for {}'.format(idx, inp))
+            if idx%150000==0: logging.info(f'{idx} tokens processed for {inp}')
             
         #logging.info(labels_to_vecs)
     
@@ -112,8 +136,8 @@ def main():
         logging.info((type(mtx), mtx.shape, M.shape, idx))
 
         #model_file_name = '__'.join([os.path.basename(fn) for fn in args.representations])
-        #with open('models/{}.pickle'.format(model_file_name), 'wb') as f:
-        with open('{}/{}{}_D{}.pickle'.format(out_dir_name, os.path.basename(rep), '_norm' if args.norm else '', D is not None), 'wb') as fo:
+        #with open('models/{model_file_name}.pickle', 'wb') as f:
+        with open(f'{args.out_dir}/{os.path.basename(rep)}{"_norm" if args.norm else ""}_D{D is not None}{"_pair" if args.pair else ""}.pickle', 'wb') as fo:
             pickle.dump((labels_to_ids, labels_to_freq, mtx), fo)
 
 

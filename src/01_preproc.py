@@ -1,4 +1,4 @@
-import os
+import os, sys
 
 import numpy as np
 
@@ -17,9 +17,9 @@ logging.config.dictConfig({
 
 class Preprocessor(object):
 
-    def __init__(self, dataset_reader, transformer, tokenizer_id, gpu, pooling, mlm):
+    def __init__(self, dataset_reader, transformer, tokenizer_id, gpu, pooling, mlm, mask=False):
         klass = globals()[dataset_reader]
-        self.reader = klass(transformer, tokenizer_id, gpu, pooling, mlm)
+        self.reader = klass(transformer, tokenizer_id, gpu, pooling, mlm, mask)
         self.transformer_model = transformer.split('/')[-1]
 
 
@@ -119,8 +119,16 @@ if __name__ == '__main__':
     parser.add_argument('--not-reduced', dest='reduced', action='store_false')
     parser.set_defaults(reduced=False)
 
+    parser.add_argument('--mask', dest='mask', action='store_true', help='Whether apply masking of the labeled words.')
+    parser.add_argument('--not-mask', dest='mask', action='store_false')
+    parser.set_defaults(mask=False)
+
     parser.add_argument('--layers', nargs='+', default=None, type=int, help='Which layers of the model to save for later computation.')
     args = parser.parse_args()
+
+    if args.reduced == False and args.mask == True:
+        logging.error('Illegal combination of args: --not-reduced and --mask cannot be used together.')
+        sys.exit(2)
 
     if args.tokenizer is None:
         args.tokenizer = args.transformer
@@ -132,7 +140,7 @@ if __name__ == '__main__':
 
     logging.info(args)
 
-    p = Preprocessor(args.reader, args.transformer, args.tokenizer, args.gpu_id, args.pooling, args.mlm)
+    p = Preprocessor(args.reader, args.transformer, args.tokenizer, args.gpu_id, args.pooling, args.mlm, args.mask)
     for i,f in enumerate(args.in_files):
         file_names = p.extract_embeddings(f, dirname, average=args.average, reduced=args.reduced, layers=args.layers)
 

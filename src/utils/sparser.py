@@ -1,4 +1,4 @@
-# forked version of Yubei Chen, Sparse Manifold Transform Lib Ver 0.1
+# Yubei Chen, Sparse Manifold Transform Lib Ver 0.1
 """
 This file contains multiple method to sparsify the coefficients
 """
@@ -48,24 +48,28 @@ def ISTA_PN(I,basis,lambd,num_iter,eta=None):
         Res = I - basis @ ahat
     return ahat, Res
 
-def FISTA(I,basis,lambd,num_iter,eta=None):
+@torch.compile
+def FISTA(I,basis,lambd,num_iter,eta=None,tol=0):
     # This is a positive-only PyTorch-Ver FISTA solver
     #if device is not None: # this is a workaround to avoid cusolver error, see https://github.com/pytorch/pytorch/issues/60892#issue-931902763
     #    torch.cuda.set_device(device)
-    dtype = basis.type()
-    batch_size=I.size(1)
-    M = basis.size(1)
-    if eta is None:
+    #alphas_size = I.shape[1] * basis.shape[1]
+    with torch.no_grad():
+      dtype = basis.type()
+      batch_size=I.size(1)
+      M = basis.size(1)
+      if eta is None:
         L = torch.linalg.eigvalsh(basis @ basis.t())[-1] # torch.max(torch.symeig(basis @ basis.t(),eigenvectors=False)[0])
         eta = 1./L
 
-    tk_n = 1.
-    tk = 1.
-    Res = torch.FloatTensor(I.size()).fill_(0).to(I.device)
-    ahat = torch.FloatTensor(M,batch_size).fill_(0).to(I.device)
-    ahat_y = torch.FloatTensor(M,batch_size).fill_(0).to(I.device)
+      tk_n = 1.
+      tk = 1.
+      Res = torch.FloatTensor(I.size()).fill_(0).to(I.device)
+      ahat = torch.FloatTensor(M,batch_size).fill_(0).to(I.device)
+      ahat_y = torch.FloatTensor(M,batch_size).fill_(0).to(I.device)
 
-    for t in range(num_iter):
+      res_norm, old_res_norm = 0, torch.inf
+      for t in range(num_iter):
         tk = tk_n
         tk_n = (1+np.sqrt(1+4*tk**2))/2
         ahat_pre = ahat
@@ -73,8 +77,20 @@ def FISTA(I,basis,lambd,num_iter,eta=None):
         ahat_y = ahat_y.add(eta * basis.t() @ Res)
         ahat = ahat_y.sub(eta * lambd).clamp(min = 0.)
         ahat_y = ahat.add(ahat.sub(ahat_pre).mul((tk-1)/(tk_n)))
-    Res = I - (basis @ ahat)
-    return ahat, Res
+        
+        res_norm = torch.linalg.norm(Res)
+        reduction = (old_res_norm - res_norm) / old_res_norm
+        if reduction < tol:
+          break
+        old_res_norm = res_norm
+        #sparsity_level = (ahat==0).sum() / alphas_size
+        #if sparsity_level < 0.97:
+        #    break
+        #Res = I - (basis @ ahat)
+        #if torch.linalg.norm(Res) < 1e-5:
+        #    break
+      Res = I - (basis @ ahat)
+      return ahat, Res
 
 def ISTA(I,basis,lambd,num_iter,eta=None):
     # This is a positive-only PyTorch-Ver ISTA solver

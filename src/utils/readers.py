@@ -26,10 +26,11 @@ logging.config.dictConfig({
 
 class SeqReader(object):
 
-    def __init__(self, transformer=None, tokenizer_id=None, gpu=0, pooling='mean', mlm=False):
+    def __init__(self, transformer=None, tokenizer_id=None, gpu=0, pooling='mean', mlm=False, mask=False):
         self.transformer_model = transformer
         self.pooling_strategy = pooling
         self.mlm = mlm
+        self.mask = mask
         if transformer is not None:
             self.tokenizer, self.model = self.load_transformer(transformer, tokenizer_id, gpu, mlm)
 
@@ -44,10 +45,13 @@ class SeqReader(object):
 
     def load_transformer(self, transformer, tokenizer_id, gpu_id, mlm=False):
         self.set_device(gpu_id)
+        trust_remote_code=False
         conf = AutoConfig.from_pretrained(transformer, output_hidden_states=True)
+        if hasattr(conf, 'num_concepts'): # a model with latent conecpts as outputs
+            trust_remote_code = True
         tokenizer = AutoTokenizer.from_pretrained(tokenizer_id, use_fast=transformer!='EMBEDDIA/sloberta')
         if mlm:
-            model = AutoModelForMaskedLM.from_pretrained(transformer, config=conf)
+            model = AutoModelForMaskedLM.from_pretrained(transformer, config=conf, trust_remote_code=trust_remote_code)
         else:
             model = AutoModel.from_pretrained(transformer, config=conf)
         model.to(self.device)
@@ -95,7 +99,7 @@ class SeqReader(object):
         with torch.no_grad():
             output = self.model(torch.tensor([indexed_tokens_with_specials]).to(self.device))
             if self.mlm:
-                extra_symbols = self.model.base_model.embeddings.word_embeddings.weight.shape[0] - len(self.tokenizer)
+                extra_symbols = getattr(self.model.config, 'num_concepts', 0)
                 vecs = torch.nn.functional.softmax(output['logits'][:,:,-extra_symbols:], dim=-1)
             else:
                 vecs = output['hidden_states']
@@ -135,7 +139,16 @@ class SemcorReader(SeqReader):
             for orig_token in list(s):
                 seq_tokens.append(orig_token.text)
                 is_tagged.append(orig_token.tag=='instance')
-            yield seq_tokens, is_tagged
+            if self.mask:
+                mask_positions = np.where(is_tagged)[0]
+                for mp in mask_positions:
+                    new_seq_tokens, new_is_tagged = [], []
+                    for i,st in enumerate(seq_tokens):
+                        new_seq_tokens.append(st if i != mp else self.tokenizer.mask_token)
+                        new_is_tagged.append(i==mp)
+                    yield new_seq_tokens, new_is_tagged
+            else:
+                yield seq_tokens, is_tagged
 
 
     def get_tokens(self, in_file, pwn_labels=True):
