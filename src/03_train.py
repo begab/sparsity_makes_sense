@@ -137,7 +137,7 @@ def main():
 
         #model_file_name = '__'.join([os.path.basename(fn) for fn in args.representations])
         #with open('models/{model_file_name}.pickle', 'wb') as f:
-        with open(f'{args.out_dir}/{os.path.basename(rep)}{"_norm" if args.norm else ""}_D{D is not None}{"_pair" if args.pair else ""}.pickle', 'wb') as fo:
+        with open(f'{args.out_dir}/{os.path.basename(rep)}{"_norm" if args.norm else ""}_D{D is not None}{"_pair" if args.pairs else ""}.pickle', 'wb') as fo:
             pickle.dump((labels_to_ids, labels_to_freq, mtx), fo)
 
 
