@@ -1,5 +1,6 @@
 import os, sys
 import pickle
+from utils.utils import transform_atoms
 from utils.readers import *
 
 import numpy as np
@@ -78,23 +79,7 @@ def main():
             if D is not None:
                 M = M @ D.T
             elif D is None and args.pairs:
-                data, indices, indptrs = [], [], [0]
-                M.data = np.ones_like(M.data)
-                num_samples, num_atoms = M.shape
-                for sid in range(num_samples):
-                    coocc = M[sid].T @ M[sid]
-                    new_data, new_indices = [], []
-                    for row_id, (from_idx, to_idx) in enumerate(zip(coocc.indptr, coocc.indptr[1:])):
-                        for val, ind in zip(coocc.data[from_idx:to_idx], coocc.indices[from_idx:to_idx]):
-                            if ind >= row_id:
-                                new_data.append(val)
-                                new_indices.append(row_id *  num_atoms + ind)
-                    data.extend(new_data)
-                    indices.extend(new_indices)
-                    indptrs.append(len(data))
-                    if sid % 2500 == 0:
-                        logging.info((sid, len(data), len(indptrs)))
-                M = scipy.sparse.csr_matrix((data, indices, indptrs), shape=(num_samples, num_atoms **2))
+                M = transform_atoms(M, weight=True, use_singletons=True, use_pairs=True)
 
         elif rep.endswith('.npy'):
             M = np.load(rep)

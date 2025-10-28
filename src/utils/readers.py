@@ -22,7 +22,8 @@ logging.config.dictConfig({
     'version': 1,
     'disable_existing_loggers': True,
 })
-
+torch.set_float32_matmul_precision('high')
+torch.backends.cuda.matmul.allow_tf32 = True
 
 class SeqReader(object):
 

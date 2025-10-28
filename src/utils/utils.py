@@ -1,5 +1,7 @@
+import scipy
 import numpy as np
 import collections
+from tqdm.auto import tqdm
 
 import xml.etree.ElementTree as ET
 
@@ -112,3 +114,26 @@ def calculate_column_norms(sparse_matrix):
         squared_norms[s] += value**2
     return {k:np.sqrt(v) for k,v in squared_norms.items()}
 
+
+def transform_atoms(M, weight=False, use_singletons=True, use_pairs=True):
+    assert use_singletons or use_pais
+
+    if weight==False:
+        M.data = np.ones_like(M.data)
+
+    num_samples, num_atoms = M.shape
+
+    progress = tqdm
+    data, indices, indptrs = [], [], [0]
+    for sid in tqdm(range(num_samples), ncols=100, desc='Transform atoms'):
+        coocc = M[sid].T @ M[sid]
+        new_data, new_indices = [], []
+        for row_id, (from_idx, to_idx) in enumerate(zip(coocc.indptr, coocc.indptr[1:])):
+            for val, ind in zip(coocc.data[from_idx:to_idx], coocc.indices[from_idx:to_idx]):
+                if (use_singletons and ind == row_id) or (use_pairs and ind > row_id):
+                    new_data.append(val)
+                    new_indices.append(row_id *  num_atoms + ind)
+        data.extend(new_data)
+        indices.extend(new_indices)
+        indptrs.append(len(data))
+    return scipy.sparse.csr_matrix((data, indices, indptrs), shape=(num_samples, num_atoms **2))

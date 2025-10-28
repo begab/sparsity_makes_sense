@@ -64,9 +64,9 @@ if __name__ == '__main__':
             embeddings = np.asfortranarray(embeddings)
 
         if dict_file is None:
-            dict_file = f'{in_file}_norm{args.normalize}_K{args.K}_lda{args.lda}{"" if args.spams else "_torch"}_{params["iter"]}it'
+            dict_file = f'{in_file.replace(".npy", "")}_norm{args.normalize}_K{args.K}_lda{args.lda}{"" if args.spams else "_torch"}_{params["iter"]}it'
 
-            if not os.path.exists(f'{dict_file.replace(".npy", "")}.npy'):
+            if not os.path.exists(f'{dict_file}.npy'):
                 logging.info(f"Dictionary learning for embeddings of shape: {embeddings.shape}")
                 if args.spams:
                     D = spams.trainDL(embeddings, **params)
@@ -107,7 +107,7 @@ if __name__ == '__main__':
         alphas_file = f'{dict_file}_{os.path.basename(in_file)}_norm{args.normalize}_K{args.K}_lda{args.lda}'
         logging.info((dict_file, alphas_file))
 
-        D = np.load(f'{dict_file.replace(".npy", "")}.npy')
+        D = np.load(f'{dict_file}.npy')
         logging.info((D.dtype, embeddings.dtype, D.shape, embeddings.shape))
 
         if args.spams:

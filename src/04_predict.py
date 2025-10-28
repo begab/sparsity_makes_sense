@@ -2,9 +2,10 @@ import os
 import sys
 import pickle
 import subprocess
+from tqdm.auto import tqdm
 from utils.readers import *
 from utils.evaluate_answers import parse_file, evaluate
-from utils.utils import row_normalize, get_synsets, create_batch
+from utils.utils import row_normalize, get_synsets, create_batch, transform_atoms
 
 import numpy as np
 import scipy.sparse
@@ -45,7 +46,7 @@ class Evaluator(object):
       for line in open(sense_inventory_file):
           if pwn:
               lemma, pos, *rest = line.strip().split()
-              self.sense_inventory['{}.{}'.format(lemma, pos).lower()] = rest  # lemma to potential sensekey list
+              self.sense_inventory[f'{lemma}.{pos}'.lower()] = rest  # lemma to potential sensekey list
           else:
               lemma, *senses = line.strip().split()
               self.sense_inventory[lemma.lower()] = senses
@@ -62,7 +63,7 @@ class Evaluator(object):
           if self.use_pmi:
               total, row_sum, col_sum = M.sum(), M.sum(axis=1), M.sum(axis=0)
               data, indices, ind_ptr = [], [], [0]
-              for i, r in enumerate(M):
+              for i, r in tqdm(enumerate(M)):
                   if np.any(r.data==0):
                       zero_idx = np.where(r.data==0)[0]
                       #logging.warning(("contains 0: ",i,self.id_to_label[i], [r.indices[z] for z in zero_idx]))
@@ -135,9 +136,9 @@ class Evaluator(object):
       with open(out_file, 'w') as f:
           for lemma_id, pred in zip(ids, preds):
               if filter_for and filter_for != 'ALL' and lemma_id.startswith(filter_for):
-                  f.write('{} {}\n'.format(lemma_id.replace('{}.'.format(filter_for), ''), pred))
+                  f.write('{} {}\n'.format(lemma_id.replace(f'{filter_for}.', ''), pred))
               elif filter_for is None or filter_for == 'ALL':
-                  f.write('{} {}\n'.format(lemma_id, pred))
+                  f.write(f'{lemma_id} {pred}\n')
 
 
 def main():
@@ -156,6 +157,10 @@ def main():
     parser.add_argument('--reduced', dest='reduced', action='store_true', help='Use it if the input matrix contains embeddings for the labeled words only')
     parser.add_argument('--not-reduced', dest='reduced', action='store_false')
     parser.set_defaults(reduced=False)
+
+    parser.add_argument('--pairs', dest='pairs', action='store_true', help='Whether to use sparse atom pairs')
+    parser.add_argument('--not-pairs', dest='pairs', action='store_false')
+    parser.set_defaults(pairs=False)
 
     parser.add_argument('--gpu_id', type=int, default=0)
 
@@ -186,16 +191,22 @@ def main():
     parser.add_argument('--babelnet', dest='use_pwn', action='store_false')
     parser.set_defaults(use_pwn=True)
 
+    parser.add_argument('--weight', dest='weight', action='store_true')
+    parser.add_argument('--not-weight', dest='weight', action='store_false')
+    parser.set_defaults(weight=True)
+
     parser.add_argument('--pred_file_location', default=None, help='Path to save the output')
 
 
     args = parser.parse_args()
+    logging.info(args)
     if args.spams==True:
         import spams
     else:
         import torch
-        from utils.sparser import FISTA 
+        from utils.sparser import FISTA     
 
+    TAB = "\t"
     klass = globals()[args.reader]
     reader = klass()
 
@@ -220,12 +231,14 @@ def main():
         mtx = np.vstack([labels_to_vecs[row] for row in sorted(labels_to_vecs)])
     else:
         mtx = scipy.sparse.vstack([labels_to_vecs[row] for row in sorted(labels_to_vecs)])
+        if args.weight == False:
+            mtx.data = np.ones_like(mtx.data)
     model_name = '&'.join([os.path.basename(fn) for fn in args.model_inputs])
     #logging.info((len(labels_to_vecs), len(labels_to_freq), labels_to_freq[0:10], mtx.shape, model_name))
 
     D = np.load(args.dictionary_file) if args.dictionary_file else None
     if D is not None and args.spams == False:
-        device = torch.device("cuda:{}".format(args.gpu_id)) if torch.cuda.is_available() else torch.device("cpu")
+        device = torch.device(f'cuda:{args.gpu_id}') if torch.cuda.is_available() else torch.device("cpu")
         D = torch.from_numpy(D).to(device)
 
     if args.eval_repr.endswith('npy'):
@@ -257,6 +270,11 @@ def main():
         if D is not None:
             R = R @ D.T
 
+    if args.pairs:
+        R = transform_atoms(R, weight=args.weight, use_singletons=True, use_pairs=True)
+        if args.weight==False:
+            R.data = np.ones_like(R.data)
+
     for b1,b2,b3 in itertools.product([True, False], repeat=3):
         if args.single_experiment and (b1 != args.use_pmi or b2 != args.nonneg_pmi or b3 != args.normalize_pmi):
             continue
@@ -273,10 +291,10 @@ def main():
 
         if args.reader == 'SemcorReader':
             if args.use_pwn:
-                if not os.path.exists("{}/Evaluation_Datasets/Scorer.class".format(args.eval_dir)):
-                    subprocess.run(["javac", "{}/Evaluation_Datasets/Scorer.java".format(args.eval_dir)])
+                if not os.path.exists(f"{args.eval_dir}/Evaluation_Datasets/Scorer.class"):
+                    subprocess.run(["javac", f"{args.eval_dir}/Evaluation_Datasets/Scorer.java"])
             ev_dir = args.eval_dir
-            ev.get_sense_inventory('{}/{}'.format(ev_dir, args.inventory_file), args.use_pwn)
+            ev.get_sense_inventory(f'{ev_dir}/{args.inventory_file}', args.use_pwn)
 
         predictions = {}
         ids, preds, expected = [], [], []
@@ -301,14 +319,14 @@ def main():
                 synset_indices = [ev.label_to_id[s] if s in ev.label_to_id else -1 for s in possible_synsets]
 
                 if len(synset_indices)==0:
-                    logging.warning('Unable to predict for {}'.format(raw_word))
+                    logging.warning(f'Unable to predict for {raw_word}')
                     continue
                 else:
                     possible_indices = synset_indices
 
                 expected.append(token[0])
                 if len(possible_labels)==0:
-                    logging.warning('No etalon sensekey for {}'.format(raw_word))
+                    logging.warning(f'No etalon sensekey for {raw_word}')
             else:
                 token_id = i
                 possible_labels = ev.id_to_label
@@ -321,32 +339,32 @@ def main():
 
         #pred_file = args.pred_file_location if args.pred_file_location is not None else np.abs(hash(model_name))
         if args.pred_file_location is not None:
-            with open('./outputs/{}_{}.out'.format('_'.join(map(str, params)), args.pred_file_location), 'w') as fo:
+            with open(f'./outputs/{"_".join(map(str, params))}_{args.pred_file_location}.out', 'w') as fo:
                 fo.write('\n'.join(preds))
 
         if args.reader == 'SemcorReader':
             if args.use_pwn:
-                for d in os.listdir('{}/Evaluation_Datasets'.format(ev_dir)):
-                    if not os.path.isdir('{}/Evaluation_Datasets/{}'.format(ev_dir, d)): continue
+                for d in os.listdir(f'{ev_dir}/Evaluation_Datasets'):
+                    if not os.path.isdir(f'{ev_dir}/Evaluation_Datasets/{d}'): continue
 
-                    tmp_pred_file = '{}_tmp.key'.format(np.abs(hash(model_name)))
+                    tmp_pred_file = f'{np.abs(hash(model_name))}_tmp.key'
                     ev.print_predictions(tmp_pred_file, ids, preds, d)
-                    result=subprocess.check_output(["java", "-cp", "{}/Evaluation_Datasets".format(ev_dir), "Scorer", "{}/Evaluation_Datasets/{}/{}.gold.key.txt".format(ev_dir, d,d), tmp_pred_file])
+                    result=subprocess.check_output(["java", "-cp", f"{ev_dir}/Evaluation_Datasets", "Scorer", f"{ev_dir}/Evaluation_Datasets/{d}/{d}.gold.key.txt", tmp_pred_file])
                     p_r_f = result.decode('utf-8').split()
                     prf = '\t'.join([p_r_f[i].replace('%', '') for i in [1,3,5]])
-                    print('{}\t{}\t{}\t{}\t{}'.format(len(preds), '\t'.join(map(str, params)), prf, d, model_name))
+                    print(f'{len(preds)}\t{TAB.join(map(str, params))}\t{prf}\t{d}\t{model_name}')
                     os.remove(tmp_pred_file)
                 print("================")
             else:
                 gold = parse_file(args.input_file.replace('data.xml', 'gold.key.txt'))
                 score = evaluate(predictions, gold, False)
                 for k,v in score.items():
-                    print('{}\t{}\t{:.4f}\t{}\t{}'.format(len(preds), '\t'.join(map(str, params)), v, k, os.path.basename(args.eval_repr)))
+                    print(f'{len(preds)}\t{TAB.join(map(str(params)))}\t{v:.4f}\t{k}\t{os.path.basename(args.eval_repr)}')
         else:
             if len(expected) != len(preds):
                 logging.warning('There is a mismatch in the number of gold annotations and predictions.')
             accuracy = sum([1 if x[0]==x[1] else 0 for x in zip(preds, expected)]) / len(preds)
-            logging.info("{}\t{}\tAccuracy: {:.5f}".format(model_name, '\t'.join(map(str, params)), accuracy))
+            logging.info(f'{model_name}\t{TAB.join(map(str, params))}\tAccuracy: {accuracy:.5f}')
 
 if __name__ == '__main__':
     main()

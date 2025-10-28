@@ -32,8 +32,7 @@ class Preprocessor(object):
         layers : list or set of ints
           which layers to save to disk (useful for efficiency purposes)
         """
-        logging.info('Averaging: {}. Using {} and {} for file {}.'.format(average,
-            self.transformer_model, type(self.reader).__name__, in_file_path))
+        logging.info(f'Averaging: {average}. Using {self.transformer_model} and {type(self.reader).__name__} for file {in_file_path}.')
 
         if layers is None:
             layers = set()
@@ -42,7 +41,7 @@ class Preprocessor(object):
         elif type(layers) is list:
             layers = set(layers)
 
-        out_file_prefix = '{}/{}_{}_avg_{}_layer_'.format(out_path, os.path.basename(in_file_path), self.transformer_model, average)
+        out_file_prefix = f'{out_path}/{os.path.basename(in_file_path)}_{self.transformer_model}_avg_{average}_layer_'
         self.vectors = {}
         self.need_to_open = {}
         id_to_check = None
@@ -58,21 +57,21 @@ class Preprocessor(object):
                     self.vectors[layer_id] = []
                     self.need_to_open[layer_id] = True
                 assert (average and len(is_tagged)==1) or (not average and len(sequence)==len(is_tagged))
-                self.vectors[layer_id].extend(embs[np.array(is_tagged)] if reduced else embs)
+                self.vectors[layer_id].extend(embs[is_tagged] if reduced else embs)
 
             if len(self.vectors[id_to_check]) > 20000:
                 self.dump_embeddings(out_file_prefix)
                 logging.info((i, len(self.vectors[id_to_check]), sequence))
-            if i%5000==0: logging.info("{} sentences processed".format(i))
+            if i%5000==0: logging.info(f"{i} sentences processed")
         out_files = self.dump_embeddings(out_file_prefix)
 
         if len(layers) > 1:
-            averaged = np.load('{}{}.npy'.format(out_file_prefix, layers_list[0]))
-            averaged_file = '{}{}'.format(out_file_prefix, layers_list[0])
+            averaged = np.load(f'{out_file_prefix}{layers_list[0]}.npy')
+            averaged_file = f'{out_file_prefix}{layers_list[0]}'
             for l in layers_list[1:]:
-                logging.info('{}{}.npy'.format(out_file_prefix, l))
-                averaged_file += '-{}'.format(l)
-                averaged += np.load('{}{}.npy'.format(out_file_prefix, l))
+                logging.info(f'{out_file_prefix}{l}.npy')
+                averaged_file += f'-{l}'
+                averaged += np.load(f'{out_file_prefix}{l}.npy')
             out_files.append(averaged_file)
             np.save(averaged_file, averaged / len(layers))
         return out_files
@@ -82,12 +81,12 @@ class Preprocessor(object):
         out_file_names = []
         for layer_id, vecs in self.vectors.items():
             if len(vecs)==0: continue
-            out_file = '{}{}'.format(out_file_prefix, layer_id)
+            out_file = f'{out_file_prefix}{layer_id}'
             out_file_names.append(out_file)
             if self.need_to_open[layer_id]:
                 np.save(out_file, vecs)
             else:
-                to_extend = np.load('{}.npy'.format(out_file))
+                to_extend = np.load(f'{out_file}.npy')
                 np.save(out_file, np.vstack([to_extend, vecs]))
             self.vectors[layer_id] = []
             self.need_to_open[layer_id] = False
@@ -133,10 +132,10 @@ if __name__ == '__main__':
     if args.tokenizer is None:
         args.tokenizer = args.transformer
 
-    dirname = os.path.dirname('{}/{}_{}/{}/'.format(args.out_dir, args.transformer.replace('/', '_'), 'reduced' if args.reduced else 'full', args.pooling))
+    dirname = os.path.dirname(f'{args.out_dir}/{args.transformer.replace("/", "_")}_{"reduced" if args.reduced else "full"}/{args.pooling}/')
     if not os.path.isdir(dirname):
         os.makedirs(dirname)
-        logging.info('{} created'.format(dirname))
+        logging.info(f'{dirname} created')
 
     logging.info(args)
 
@@ -146,12 +145,12 @@ if __name__ == '__main__':
 
         if args.zca:
             for j,fn in enumerate(file_names):
-                X = np.load('{}.npy'.format(fn))
+                X = np.load(f'{fn}.npy')
                 if i == 0: # it is important that the first element in args.in_files is the (SemCor) training dataset
                     mu = np.mean(X, axis=0)
                     X -= mu
                     U, sigmas, _ = np.linalg.svd(np.cov(X.T))
                     zca_trafo = U @ np.diag(1/np.sqrt(sigmas + 1e-7)) @ U.T
                     X_whitened = X @ zca_trafo
-                    np.save('{}_zca'.format(fn), np.vstack((mu, zca_trafo)))
+                    np.save(f'{fn}_zca', np.vstack((mu, zca_trafo)))
 
