@@ -122,18 +122,19 @@ def transform_atoms(M, weight=False, use_singletons=True, use_pairs=True):
         M.data = np.ones_like(M.data)
 
     num_samples, num_atoms = M.shape
+    if use_singletons and not use_pairs:
+        filter_fun = lambda x: x[0][0]==x[1][0]
+    elif use_singletons:
+        filter_fun = lambda x: x[0][0]>=x[1][0]
+    else:
+        filter_fun = lambda x: x[0][0]>x[1][0]
 
-    progress = tqdm
     data, indices, indptrs = [], [], [0]
     for sid in tqdm(range(num_samples), ncols=100, desc='Transform atoms'):
-        coocc = M[sid].T @ M[sid]
-        new_data, new_indices = [], []
-        for row_id, (from_idx, to_idx) in enumerate(zip(coocc.indptr, coocc.indptr[1:])):
-            for val, ind in zip(coocc.data[from_idx:to_idx], coocc.indices[from_idx:to_idx]):
-                if (use_singletons and ind == row_id) or (use_pairs and ind > row_id):
-                    new_data.append(val)
-                    new_indices.append(row_id *  num_atoms + ind)
-        data.extend(new_data)
-        indices.extend(new_indices)
+
+        z = list(zip(M[sid].indices, M[sid].data))
+        for (ind1, val1),(ind2, val2) in filter(filter_fun, itertools.product(z,z)):
+            data.append(val1 * val2)
+            indices.append(ind2 * num_atoms + ind1)
         indptrs.append(len(data))
     return scipy.sparse.csr_matrix((data, indices, indptrs), shape=(num_samples, num_atoms **2))

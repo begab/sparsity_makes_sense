@@ -38,7 +38,7 @@ def main():
     parser.set_defaults(reduced=False)
 
     parser.add_argument('--pairs', dest='pairs', action='store_true', help='Whether to use sparse atom pairs')
-    parser.add_argument('--no-pairs', dest='pairs', action='store_false')
+    parser.add_argument('--not-pairs', dest='pairs', action='store_false')
     parser.set_defaults(pairs=False)
 
     parser.add_argument('--lexname', dest='senseid', action='store_false')
@@ -88,16 +88,12 @@ def main():
         for token in reader.get_tokens(inp, args.wn):
             labels = token[0 if args.senseid else 1]
             vec = None
-            if not args.reduced:
-                vec = M[idx]
-                idx += 1
-            elif args.reduced and len(labels) > 0:
-                vec = M[idx]
+            if not args.reduced or (args.reduced and len(labels) > 0):
+                vec = M[idx] / (M[idx].sum() if args.norm and M[idx].sum() > 0 else 1.0)
                 idx += 1
             else:
                 continue
 
-            if args.norm and vec.sum() > 0: vec /= vec.sum()
             for label in labels:
                 if label not in labels_to_ids:
                     label_id = len(labels_to_ids)

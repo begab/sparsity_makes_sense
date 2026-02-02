@@ -5,6 +5,7 @@ import subprocess
 from tqdm.auto import tqdm
 from utils.readers import *
 from utils.evaluate_answers import parse_file, evaluate
+from utils.evaluate_F1 import evaluate_microF1, evaluate_macroF1
 from utils.utils import row_normalize, get_synsets, create_batch, transform_atoms
 
 import numpy as np
@@ -148,6 +149,8 @@ def main():
     parser.add_argument('--input_file', type=str, required=True)
     parser.add_argument('--model_inputs', nargs='+', type=str, required=True)
     parser.add_argument('--eval_repr', type=str, required=True)
+    parser.add_argument('--transformer', type=str, help='Provide it only if the representations are to be calculated on-the fly.')
+    parser.add_argument('--layer', type=int, help='The layer to use.')
     parser.add_argument('--eval_dir', type=str)
     parser.add_argument('--dictionary_file', type=str)
     parser.add_argument('--xling_mapping_file', type=str)
@@ -240,6 +243,12 @@ def main():
     if D is not None and args.spams == False:
         device = torch.device(f'cuda:{args.gpu_id}') if torch.cuda.is_available() else torch.device("cpu")
         D = torch.from_numpy(D).to(device)
+
+    if args.transformer:
+        p = Preprocessor(args.reader, args.transformer, args.transformer, args.gpu_id, pooling='mean', mlm=False, mask=False)
+        file_names = p.extract_embeddings(f, dirname, average=False, reduced=args.reduced, layers=args.layers)
+        print(file_names)
+        sys.exit(3)
 
     if args.eval_repr.endswith('npy'):
         R = np.load(args.eval_repr)
@@ -344,17 +353,22 @@ def main():
 
         if args.reader == 'SemcorReader':
             if args.use_pwn:
-                for d in os.listdir(f'{ev_dir}/Evaluation_Datasets'):
-                    if not os.path.isdir(f'{ev_dir}/Evaluation_Datasets/{d}'): continue
+                gold = parse_file(args.input_file.replace('data.xml', 'gold.key.txt'))
+                data_id = args.input_file.split('/')[-1]
+                #for d in os.listdir(f'{ev_dir}/Evaluation_Datasets'):
+                #if not os.path.isdir(f'{ev_dir}/Evaluation_Datasets/{d}'): continue
 
-                    tmp_pred_file = f'{np.abs(hash(model_name))}_tmp.key'
-                    ev.print_predictions(tmp_pred_file, ids, preds, d)
-                    result=subprocess.check_output(["java", "-cp", f"{ev_dir}/Evaluation_Datasets", "Scorer", f"{ev_dir}/Evaluation_Datasets/{d}/{d}.gold.key.txt", tmp_pred_file])
-                    p_r_f = result.decode('utf-8').split()
-                    prf = '\t'.join([p_r_f[i].replace('%', '') for i in [1,3,5]])
-                    print(f'{len(preds)}\t{TAB.join(map(str, params))}\t{prf}\t{d}\t{model_name}')
-                    os.remove(tmp_pred_file)
-                print("================")
+                #tmp_pred_file = f'{np.abs(hash(model_name))}_tmp.key'
+                #ev.print_predictions(tmp_pred_file, ids, preds, d)
+                #result=subprocess.check_output(["java", "-cp", f"{ev_dir}/Evaluation_Datasets", "Scorer", f"{ev_dir}/Evaluation_Datasets/{d}/{d}.gold.key.txt", tmp_pred_file])
+                #p_r_f = result.decode('utf-8').split()
+                #prf = '\t'.join([p_r_f[i].replace('%', '') for i in [1,3,5]])
+
+                f1 = evaluate_microF1(predictions, gold)
+                f1_macro = evaluate_macroF1(predictions, gold)
+                print(f'{data_id}\t{len(preds)}\t{TAB.join(map(str, params))}\t{f1:.4f}\t{f1_macro:.4f}\t{model_name}')
+                #os.remove(tmp_pred_file)
+                #print("================")
             else:
                 gold = parse_file(args.input_file.replace('data.xml', 'gold.key.txt'))
                 score = evaluate(predictions, gold, False)

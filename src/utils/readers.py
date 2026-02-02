@@ -222,7 +222,7 @@ class WngtReader(SeqReader):
                 is_tagged.append('wn30_key' in orig_token.attrib)
             yield seq_tokens, is_tagged
 
-    def get_tokens(self, in_file):
+    def get_tokens(self, in_file, pwn=None):
         root = ET.parse(in_file).getroot()
         for i,s in enumerate(root.findall('document/paragraph/sentence')):
             for t in s:
@@ -256,7 +256,7 @@ class WordNetReader(SeqReader):
             tokens = s[1].split()
             yield tokens, len(tokens) * [True]
 
-    def get_tokens(self, in_file=None):
+    def get_tokens(self, in_file=None, pwn=None):
         data = []
         for i, synset in enumerate(wn.all_synsets()):
             gloss = ' '.join(word_tokenize(synset.definition()))

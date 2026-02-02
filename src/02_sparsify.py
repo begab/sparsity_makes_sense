@@ -45,7 +45,7 @@ if __name__ == '__main__':
     params = {'K': args.K, 'lambda1': args.lda, 'numThreads': 8, 'iter': args.dl_iter, 'batchsize': 512, 'posAlpha': True, 'verbose': False}
     lasso_params = {x:params[x] for x in ['L','lambda1','lambda2','mode','pos','ols','numThreads','length_path','verbose'] if x in params}
     lasso_params['pos'] = True
-    dict_file = args.predefined_dictionary_file # when follows random:x pattern, the dictionary is randomly generated using seed x
+    dict_file = args.predefined_dictionary_file.replace('.npy', '') # when follows random:x pattern, the dictionary is randomly generated using seed x
     D = None
     if args.spams:
         import spams

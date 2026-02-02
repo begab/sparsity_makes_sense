@@ -41,7 +41,9 @@ class Preprocessor(object):
         elif type(layers) is list:
             layers = set(layers)
 
-        out_file_prefix = f'{out_path}/{os.path.basename(in_file_path)}_{self.transformer_model}_avg_{average}_layer_'
+        out_file_prefix = None
+        if out_path:
+            out_file_prefix = f'{out_path}/{os.path.basename(in_file_path)}_{self.transformer_model}_avg_{average}_layer_'
         self.vectors = {}
         self.need_to_open = {}
         id_to_check = None
@@ -59,11 +61,12 @@ class Preprocessor(object):
                 assert (average and len(is_tagged)==1) or (not average and len(sequence)==len(is_tagged))
                 self.vectors[layer_id].extend(embs[is_tagged] if reduced else embs)
 
-            if len(self.vectors[id_to_check]) > 20000:
+            if out_file_prefix and len(self.vectors[id_to_check]) > 20000:
                 self.dump_embeddings(out_file_prefix)
                 logging.info((i, len(self.vectors[id_to_check]), sequence))
             if i%5000==0: logging.info(f"{i} sentences processed")
-        out_files = self.dump_embeddings(out_file_prefix)
+        if out_file_prefix:
+            out_files = self.dump_embeddings(out_file_prefix)
 
         if len(layers) > 1:
             averaged = np.load(f'{out_file_prefix}{layers_list[0]}.npy')
@@ -74,7 +77,7 @@ class Preprocessor(object):
                 averaged += np.load(f'{out_file_prefix}{l}.npy')
             out_files.append(averaged_file)
             np.save(averaged_file, averaged / len(layers))
-        return out_files
+        return out_files if out_file_prefix else np.vstack([self.vectors[layers[0]]])
 
 
     def dump_embeddings(self, out_file_prefix):
