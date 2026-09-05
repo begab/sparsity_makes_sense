@@ -6,14 +6,17 @@ representations
 WSD_Evaluation_Framework
 utils_src
 
+*.bak
 *.swp
 *.mod
 *.log
 *.sh
+*.gz
 *.class
 *.pyc
 *.png
 *.pdf
 *.out
+*.res
 __pycache__
 .vscode

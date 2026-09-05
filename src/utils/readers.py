@@ -1,6 +1,6 @@
 import torch
 import numpy as np
-from transformers import AutoConfig, AutoModel, AutoTokenizer, AutoModelForMaskedLM
+from transformers import AutoConfig, AutoModel, AutoTokenizer, AutoModelForMaskedLM, DataCollatorWithPadding
 
 from nltk import word_tokenize
 from nltk.corpus import wordnet as wn
@@ -34,6 +34,7 @@ class SeqReader(object):
         self.mask = mask
         if transformer is not None:
             self.tokenizer, self.model = self.load_transformer(transformer, tokenizer_id, gpu, mlm)
+            self.collator = DataCollatorWithPadding(tokenizer=self.tokenizer, padding=True, return_tensors='pt')
 
     def set_device(self, device_id):
         device_count = torch.cuda.device_count()
@@ -61,21 +62,89 @@ class SeqReader(object):
     def read_sequences(self, in_file, limit=-1):
         raise Exception("Method unimplemented")
 
-    def read_sequences_with_embeddings(self, in_file, limit=-1, average=False):
+    def read_sequences_with_embeddings(self, in_file, limit=-1, average=False, batch_size=512):
         if self.transformer_model is None:
             raise Exception('Reader object was not initialized with a transformer model')
 
+        is_tagged_list, sequence_list = [], []
         for i,(sequence, is_tagged) in enumerate(self.read_sequences(in_file, limit)):
             is_tagged = [True] if average else is_tagged
-            yield self.process_sequence(sequence, average) + (is_tagged,)
+            is_tagged_list.append(is_tagged)
+            sequence_list.append(sequence)
+            if len(sequence_list) == batch_size:
+                for a,b,c in zip(self.process_sequence_new(sequence_list, average), sequence_list, is_tagged_list):
+                    yield a,b,c
+                is_tagged_list, sequence_list = [], []
+        if len(sequence_list) > 0:
+            for a,b,c in zip(self.process_sequence_new(sequence_list, average), sequence_list, is_tagged_list):
+                yield a,b,c
 
-    def process_sequence(self, seq, average):
-        tokens, indexed_tokens = self.tokenize_sequence(seq)
-        if tokens is None:
-            return None, seq
-        else:
-            return self.get_representation(tokens, indexed_tokens, average), seq
+    def process_sequence_new(self, sequences, average):
+        its, tokens = [], []
+        #tokens_sanities = []
+        for seq in sequences:
+            #tokens_sanity, indexed_tokens_sanity = self.tokenize_sequence(seq)
+            #tokens_sanities.append(tokens_sanity)
+            its.append(self.tokenizer(seq, is_split_into_words=True, return_token_type_ids=False))
+            tokens.append(its[-1].word_ids())
+        indexed_tokens = self.collator(its).to(self.device)
 
+        vecs = self.get_vecs(indexed_tokens)
+        for seq_id in range(len(sequences)):
+            seq_vecs = [vecs[layer_id][seq_id] for layer_id in range(len(vecs))]
+            tok_ids = self.convert_token_ids(tokens[seq_id])
+            #sanity_check = np.all([a==b for a,b in zip(tok_ids, tokens_sanities[seq_id])])
+            #if sanity_check == False:
+            #    print(tok_ids, tokens_sanities[seq_id], seq_id)
+            yield self.get_representation_new(tok_ids, seq_vecs, average)
+    
+    def convert_token_ids(self, token_membership):
+        to_return = []
+        current_id = -1
+        for i, tm in enumerate(token_membership):
+            if tm is not None and tm != current_id:
+                to_return.append(i)
+                current_id = tm
+        to_return.append(i)
+        return to_return
+
+    def get_vecs(self, indexed_tokens):
+        vecs = None
+        with torch.no_grad():
+            output = self.model(**indexed_tokens.to(self.device))
+            if self.mlm:
+                extra_symbols = getattr(self.model.config, 'num_concepts', 0)
+                vecs = torch.nn.functional.softmax(output['logits'][:,:,-extra_symbols:], dim=-1)
+            else:
+                vecs = list(output['hidden_states'])
+                if hasattr(self.model, 'final_norm'):
+                    vecs.append(self.model.final_norm(vecs[-1]))
+        return vecs
+
+    def get_representation_new(self, word_mapping, vecs, average):
+        per_layer_embeddings = []
+        for emb in vecs:
+            if self.mlm:
+                emb = emb.unsqueeze(0)
+            if average: # XXX TODO test this 
+                averaged = torch.mean(emb, dim=0).detach().cpu().numpy().reshape(1,-1)
+                per_layer_embeddings.append(averaged)
+            else:
+                token_embeddings = []
+                for k,l in zip(word_mapping, word_mapping[1:]):
+                    ki, li = k, l
+                    if self.pooling_strategy == 'first':
+                        li=ki+1
+                    elif self.pooling_strategy == 'last':
+                        ki=li-1
+                    elif self.pooling_strategy == 'norm':
+                        norms = torch.linalg.norm(emb[k:l], dim=1)
+                        ki += torch.argmax(norms).item()
+                        li = ki + 1
+                    token_embeddings.append(torch.mean(emb[ki:li], dim=0).detach().cpu().numpy())
+                per_layer_embeddings.append(np.array(token_embeddings))
+        return per_layer_embeddings
+    
     def tokenize_sequence(self, sequence):
         orig_to_tok_map, transformer_tokens = [], []
         for tok_pos, orig_token in enumerate(sequence):
@@ -95,7 +164,6 @@ class SeqReader(object):
         orig_to_tok_map = [x + specials_added for x in orig_to_tok_map]
         return orig_to_tok_map, indexed_tokens_with_specials
 
-
     def get_representation(self, orig_to_tok_map, indexed_tokens_with_specials, average):
         with torch.no_grad():
             output = self.model(torch.tensor([indexed_tokens_with_specials]).to(self.device))
@@ -103,7 +171,9 @@ class SeqReader(object):
                 extra_symbols = getattr(self.model.config, 'num_concepts', 0)
                 vecs = torch.nn.functional.softmax(output['logits'][:,:,-extra_symbols:], dim=-1)
             else:
-                vecs = output['hidden_states']
+                vecs = list(output['hidden_states'])
+                if hasattr(self.model, 'final_norm'):
+                    vecs.append(self.model.final_norm(vecs[-1]))
 
         per_layer_embeddings = []
         for emb in vecs:
@@ -131,15 +201,19 @@ class SeqReader(object):
 
 class SemcorReader(SeqReader):
 
-    def read_sequences(self, in_file, limit=-1):
+    def read_sequences(self, in_file, limit=-1, annotated=False):
         root = ET.parse(in_file).getroot()
         for i,s in enumerate(root.findall('text/sentence')):
             if i==limit: break
 
-            seq_tokens, is_tagged = [], []
+            seq_tokens, is_tagged, metadata, ids = [], [], [], []
             for orig_token in list(s):
                 seq_tokens.append(orig_token.text)
                 is_tagged.append(orig_token.tag=='instance')
+                normalized_pos = 'r'
+                if len(orig_token.attrib['pos'])>0 and orig_token.attrib['pos']!="ADV": normalized_pos = orig_token.attrib['pos'][0].lower()
+                metadata.append(f'{orig_token.attrib['lemma']}.{normalized_pos}')
+                ids.append(orig_token.get('id', ''))
             if self.mask:
                 mask_positions = np.where(is_tagged)[0]
                 for mp in mask_positions:
@@ -149,7 +223,10 @@ class SemcorReader(SeqReader):
                         new_is_tagged.append(i==mp)
                     yield new_seq_tokens, new_is_tagged
             else:
-                yield seq_tokens, is_tagged
+                if annotated:
+                    yield seq_tokens, is_tagged, metadata, ids
+                else:
+                    yield seq_tokens, is_tagged
 
 
     def get_tokens(self, in_file, pwn_labels=True):
@@ -187,10 +264,7 @@ class SemcorReader(SeqReader):
                             # in the pre XL-WSD era we used to do the following:
                             # synset = wn.synset_from_pos_and_offset(sensekey[-1], int(sensekey[3:-1]))
                             synset_labels.append(sensekey)
-                if 'lemma' in token.attrib:
-                    lemma = '{}{}{}'.format(token.attrib['lemma'], pos_delim,  normalized_pos)
-                else:
-                    lemma = '{}{}{}'.format(token.text, pos_delim, normalized_pos)
+                lemma = f'{token.get('lemma', token.text)}{pos_delim}{normalized_pos}'
                 yield synset_labels, lexname_labels, token_id, lemma, token.text.replace('-', '_')
 
 

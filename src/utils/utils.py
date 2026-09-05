@@ -1,6 +1,6 @@
 import scipy
 import numpy as np
-import collections
+import collections, itertools
 from tqdm.auto import tqdm
 
 import xml.etree.ElementTree as ET
@@ -116,7 +116,7 @@ def calculate_column_norms(sparse_matrix):
 
 
 def transform_atoms(M, weight=False, use_singletons=True, use_pairs=True):
-    assert use_singletons or use_pais
+    assert use_singletons or use_pairs
 
     if weight==False:
         M.data = np.ones_like(M.data)

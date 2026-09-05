@@ -20,10 +20,10 @@ class Preprocessor(object):
     def __init__(self, dataset_reader, transformer, tokenizer_id, gpu, pooling, mlm, mask=False):
         klass = globals()[dataset_reader]
         self.reader = klass(transformer, tokenizer_id, gpu, pooling, mlm, mask)
-        self.transformer_model = transformer.split('/')[-1]
+        self.transformer_model = '-'.join(transformer.split('/')[-2:])
 
 
-    def extract_embeddings(self, in_file_path, out_path, limit=-1, average=False, reduced=False, layers=None):
+    def extract_embeddings(self, in_file_path, out_path, limit=-1, average=False, reduced=False, layers=None, merge=False):
         """
         Parameters
         ----------
@@ -61,14 +61,14 @@ class Preprocessor(object):
                 assert (average and len(is_tagged)==1) or (not average and len(sequence)==len(is_tagged))
                 self.vectors[layer_id].extend(embs[is_tagged] if reduced else embs)
 
-            if out_file_prefix and len(self.vectors[id_to_check]) > 20000:
+            if out_file_prefix and len(self.vectors[id_to_check]) > 30000:
                 self.dump_embeddings(out_file_prefix)
                 logging.info((i, len(self.vectors[id_to_check]), sequence))
             if i%5000==0: logging.info(f"{i} sentences processed")
         if out_file_prefix:
             out_files = self.dump_embeddings(out_file_prefix)
 
-        if len(layers) > 1:
+        if merge and len(layers) > 1:
             averaged = np.load(f'{out_file_prefix}{layers_list[0]}.npy')
             averaged_file = f'{out_file_prefix}{layers_list[0]}'
             for l in layers_list[1:]:
@@ -77,7 +77,7 @@ class Preprocessor(object):
                 averaged += np.load(f'{out_file_prefix}{l}.npy')
             out_files.append(averaged_file)
             np.save(averaged_file, averaged / len(layers))
-        return out_files if out_file_prefix else np.vstack([self.vectors[layers[0]]])
+        return out_files if out_file_prefix else [np.vstack([self.vectors[l]]) for l in sorted(layers)]
 
 
     def dump_embeddings(self, out_file_prefix):
@@ -127,6 +127,7 @@ if __name__ == '__main__':
 
     parser.add_argument('--layers', nargs='+', default=None, type=int, help='Which layers of the model to save for later computation.')
     args = parser.parse_args()
+    args.transformer = args.transformer.rstrip('/')
 
     if args.reduced == False and args.mask == True:
         logging.error('Illegal combination of args: --not-reduced and --mask cannot be used together.')

@@ -148,11 +148,12 @@ def main():
     parser.add_argument('--reader', type=str, required=True)
     parser.add_argument('--input_file', type=str, required=True)
     parser.add_argument('--model_inputs', nargs='+', type=str, required=True)
-    parser.add_argument('--eval_repr', type=str, required=True)
+    parser.add_argument('--eval_repr', type=str)
     parser.add_argument('--transformer', type=str, help='Provide it only if the representations are to be calculated on-the fly.')
     parser.add_argument('--layer', type=int, help='The layer to use.')
     parser.add_argument('--eval_dir', type=str)
     parser.add_argument('--dictionary_file', type=str)
+    parser.add_argument('--mean_file', type=str)
     parser.add_argument('--xling_mapping_file', type=str)
     parser.add_argument('--inventory_file', type=str, default='/Data_Validation/candidatesWN30.txt')
     parser.add_argument('--lda', type=float, default=0.05)
@@ -203,6 +204,10 @@ def main():
 
     args = parser.parse_args()
     logging.info(args)
+    if args.eval_repr is None and args.transformer is None:
+        logging.error("Either of the evaluation representations or the transformer model name must be provided among the aruments.")
+        sys.exit(2)
+
     if args.spams==True:
         import spams
     else:
@@ -244,14 +249,23 @@ def main():
         device = torch.device(f'cuda:{args.gpu_id}') if torch.cuda.is_available() else torch.device("cpu")
         D = torch.from_numpy(D).to(device)
 
-    if args.transformer:
-        p = Preprocessor(args.reader, args.transformer, args.transformer, args.gpu_id, pooling='mean', mlm=False, mask=False)
-        file_names = p.extract_embeddings(f, dirname, average=False, reduced=args.reduced, layers=args.layers)
-        print(file_names)
-        sys.exit(3)
+    eval_id = os.path.basename(args.eval_repr if args.eval_repr else args.transformer)
+    if args.transformer or args.eval_repr.endswith('npy'):
+        if args.eval_repr:
+            R = np.load(args.eval_repr)
+        else:
+            import importlib
+            module = importlib.import_module('01_preproc')
+        
+            p = module.Preprocessor(args.reader, args.transformer, args.transformer, args.gpu_id, pooling='mean', mlm=False, mask=False)
+            R = p.extract_embeddings(args.input_file, None, average=False, reduced=args.reduced, layers=args.layer)[0]
 
-    if args.eval_repr.endswith('npy'):
-        R = np.load(args.eval_repr)
+        if args.mean_file:
+            logging.info(f"Before centering: {np.linalg.norm(np.mean(R, axis=0))}")
+            c = np.load(args.mean_file)
+            R -= c
+            logging.info(f"After centering: {np.linalg.norm(np.mean(R, axis=0))}")
+
         trafo = None
         if args.xling_mapping_file is not None:
             trafo = np.load(args.xling_mapping_file)
@@ -373,7 +387,7 @@ def main():
                 gold = parse_file(args.input_file.replace('data.xml', 'gold.key.txt'))
                 score = evaluate(predictions, gold, False)
                 for k,v in score.items():
-                    print(f'{len(preds)}\t{TAB.join(map(str(params)))}\t{v:.4f}\t{k}\t{os.path.basename(args.eval_repr)}')
+                    print(f'{len(preds)}\t{TAB.join(map(str(params)))}\t{v:.4f}\t{k}\t{eval_id}')
         else:
             if len(expected) != len(preds):
                 logging.warning('There is a mismatch in the number of gold annotations and predictions.')
