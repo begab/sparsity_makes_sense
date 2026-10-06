@@ -115,7 +115,7 @@ def calculate_column_norms(sparse_matrix):
     return {k:np.sqrt(v) for k,v in squared_norms.items()}
 
 
-def transform_atoms(M, weight=False, use_singletons=True, use_pairs=True):
+def transform_atoms(M, weight=True, use_singletons=True, use_pairs=True):
     assert use_singletons or use_pairs
 
     if weight==False:

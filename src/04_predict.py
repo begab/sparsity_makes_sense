@@ -1,6 +1,8 @@
 import os
 import sys
+import gzip
 import pickle
+import hashlib
 import subprocess
 from tqdm.auto import tqdm
 from utils.readers import *
@@ -62,18 +64,7 @@ class Evaluator(object):
               self.M = row_normalize(np.vstack([M, np.zeros(M.shape[1])])) # reserve an extra row of all zeros for missing categories
       else:
           if self.use_pmi:
-              total, row_sum, col_sum = M.sum(), M.sum(axis=1), M.sum(axis=0)
-              data, indices, ind_ptr = [], [], [0]
-              for i, r in tqdm(enumerate(M)):
-                  if np.any(r.data==0):
-                      zero_idx = np.where(r.data==0)[0]
-                      #logging.warning(("contains 0: ",i,self.id_to_label[i], [r.indices[z] for z in zero_idx]))
-                  idxs, pmi_values = self.sparse_pmi(r.indices, r.data, row_sum[i,0], col_sum[0, r.indices], total)
-                  indices.extend(idxs)
-                  data.extend(pmi_values)
-                  ind_ptr.append(len(data))
-              ind_ptr.append(len(data)) # reserve an extra row of all zeros for missing categories
-              self.M = csr_matrix((data, indices, ind_ptr), shape=(M.shape[0]+1, M.shape[1]))
+              self.M = self.sparse_pmi(M)
           else:
               denominators = [self.id_to_freq[i] for i,(f,to) in enumerate(zip(M.indptr, M.indptr[1:])) for _ in range(to-f)]
               M.data /= denominators
@@ -81,18 +72,21 @@ class Evaluator(object):
               M._shape = (M.shape[0]+1, M.shape[1])
               self.M = M
 
-  def sparse_pmi(self, indices, vals, row_marginal, col_marginal, total):
-      row_marginal += 1e-11
-      col_marginal += 1e-11
-      pmis = np.ma.log((total * vals) / (row_marginal * col_marginal)).filled(0)
+  def sparse_pmi(self, M, indices=None):
+      if indices is not None:
+          M = M[indices, :]
+      M.eliminate_zeros()
+      M /= M.sum()
+      row_marginals = np.repeat(np.asarray(M.sum(axis=1)).ravel(), np.diff(M.indptr))
+      col_marginals = np.array(M.sum(axis=0)).ravel()[M.indices]
+      data = np.log(M.data / (row_marginals * col_marginals))
       if self.norm_pmi:
-          pmis /= -np.ma.log(vals/total).filled(1)
-      indices_to_return, pmis_to_return = [], []
-      for idx in range(len(indices)):
-          if not self.nonneg_pmi or pmis[0,idx] > 0:
-              indices_to_return.append(indices[idx])
-              pmis_to_return.append(pmis[0,idx])
-      return indices_to_return, pmis_to_return
+          data /= -np.log(M.data)
+      new_M = csr_matrix((data, M.indices.copy(), M.indptr.copy()), shape=M.shape)
+      if self.nonneg_pmi:
+          new_M.data[new_M.data < 0] = 0
+          new_M.eliminate_zeros()
+      return new_M
 
   def dense_pmi(self, incidence_mtx):
       total_observations = incidence_mtx.sum()
@@ -148,6 +142,7 @@ def main():
     parser.add_argument('--reader', type=str, required=True)
     parser.add_argument('--input_file', type=str, required=True)
     parser.add_argument('--model_inputs', nargs='+', type=str, required=True)
+    parser.add_argument('--sparse_training_reps', nargs='+', type=str)
     parser.add_argument('--eval_repr', type=str)
     parser.add_argument('--transformer', type=str, help='Provide it only if the representations are to be calculated on-the fly.')
     parser.add_argument('--layer', type=int, help='The layer to use.')
@@ -199,8 +194,11 @@ def main():
     parser.add_argument('--not-weight', dest='weight', action='store_false')
     parser.set_defaults(weight=True)
 
-    parser.add_argument('--pred_file_location', default=None, help='Path to save the output')
+    parser.add_argument('--global_model', dest='use_global_model', action='store_true')
+    parser.add_argument('--not-global_model', dest='use_global_model', action='store_false')
+    parser.set_defaults(use_global_model=True)
 
+    parser.add_argument('--pred_file_location', default=None, help='Path to save the output')
 
     args = parser.parse_args()
     logging.info(args)
@@ -217,6 +215,19 @@ def main():
     TAB = "\t"
     klass = globals()[args.reader]
     reader = klass()
+
+    pairwise_pmis = None
+    if args.pairs and args.sparse_training_reps is not None:
+        A = scipy.sparse.vstack([scipy.sparse.load_npz(inp) for inp in args.sparse_training_reps])
+        A.data = np.ones_like(A.data)
+
+        coocc = (A.T @ A).todense() + 1e-11
+        coocc_probs = coocc / coocc.sum()
+        marginals = coocc.sum(axis=1) / coocc.sum()
+        expected_probs = np.outer(marginals, marginals)
+        pmis = np.log(coocc_probs / expected_probs)
+        normalized_pairwise_pmis = np.array((pmis / -np.log(coocc_probs)).ravel())
+        pairwise_pmis = np.array(pmis.ravel())
 
     if not os.path.exists('outputs'):
         os.makedirs('outputs')
@@ -241,6 +252,8 @@ def main():
         mtx = scipy.sparse.vstack([labels_to_vecs[row] for row in sorted(labels_to_vecs)])
         if args.weight == False:
             mtx.data = np.ones_like(mtx.data)
+        new_indptr = mtx.indptr.tolist() + [len(mtx.data)]
+        mtx = scipy.sparse.csr_matrix((mtx.data, mtx.indices, new_indptr), shape=(mtx.shape[0]+1, mtx.shape[1]))
     model_name = '&'.join([os.path.basename(fn) for fn in args.model_inputs])
     #logging.info((len(labels_to_vecs), len(labels_to_freq), labels_to_freq[0:10], mtx.shape, model_name))
 
@@ -298,6 +311,13 @@ def main():
         if args.weight==False:
             R.data = np.ones_like(R.data)
 
+    if type(R) == np.ndarray:
+        R = row_normalize(R)
+    else:
+        row_sums = np.asarray(R.sum(axis=1)).ravel()
+        row_sums[row_sums == 0] = 1 # avoid dividing by zero
+        R.data *= np.repeat(1 / row_sums, np.diff(R.indptr)) # make coeffs in each row sum to 1
+
     for b1,b2,b3 in itertools.product([True, False], repeat=3):
         if args.single_experiment and (b1 != args.use_pmi or b2 != args.nonneg_pmi or b3 != args.normalize_pmi):
             continue
@@ -310,7 +330,8 @@ def main():
             continue
 
         ev = Evaluator(labels_to_idx, labels_to_freq, params)
-        ev.load_model(mtx)
+        if args.use_global_model is True:
+            ev.load_model(mtx)
 
         if args.reader == 'SemcorReader':
             if args.use_pwn:
@@ -319,7 +340,7 @@ def main():
             ev_dir = args.eval_dir
             ev.get_sense_inventory(f'{ev_dir}/{args.inventory_file}', args.use_pwn)
 
-        predictions = {}
+        pred_scores, uncertainty_scores, uncertainty_scores2 = [], [], []
         ids, preds, expected = [], [], []
         for i, token in enumerate(reader.get_tokens(args.input_file, args.use_pwn)):
 
@@ -356,21 +377,70 @@ def main():
                 expected.append(token[0 if args.senseid else 1][0])
 
             ids.append(token_id)
-            scores = ev.M[possible_indices] @ vec.T
-            preds.append(possible_labels[np.argmax(scores)])
-            predictions[token_id] = set([preds[-1]])
+            tmp_M = None
+            if args.use_global_model==True:
+                tmp_M = ev.M[possible_indices]
+            else:
+                tmp_M = ev.sparse_pmi(mtx, indices=possible_indices)
+            scores = tmp_M @ vec.T
+            if scipy.sparse.issparse(scores):
+                scores = np.asarray(scores.toarray())
+            scores = scores.ravel()
+            scores[[pi==-1 for pi in possible_indices]] = -np.inf # the ones with no labeled training samples
+            answer_index = np.argmax(scores)
+            preds.append(possible_labels[answer_index])
+            pred_scores.append(scores[answer_index])
+
+            if pairwise_pmis is not None:
+                vec.data = np.ones_like(vec.data)
+                uscore = normalized_pairwise_pmis @ vec.todense().T
+                uncertainty_scores.append(uscore[0,0])
+                uscore = pairwise_pmis @ vec.todense().T
+                uncertainty_scores2.append(uscore[0,0])
 
         #pred_file = args.pred_file_location if args.pred_file_location is not None else np.abs(hash(model_name))
+        args.pred_file_location = None #'_'.join([os.path.basename(mi) for mi in [args.input_file] + args.model_inputs])
+        logging.info(args.pred_file_location)
         if args.pred_file_location is not None:
-            with open(f'./outputs/{"_".join(map(str, params))}_{args.pred_file_location}.out', 'w') as fo:
-                fo.write('\n'.join(preds))
+            prefix = '_'.join(list(map(str, params)))
+            out_file_name = f'{prefix}_{args.pred_file_location}'
+            hashed_file_name = hashlib.sha256(out_file_name.encode("utf-8")).hexdigest()
+            logging.info(f'{len(out_file_name)} {out_file_name} --> {hashed_file_name}')
 
+            with gzip.open(f'./outputs/{hashed_file_name}.gz', 'wt') as fo:
+                for pred, score in zip(preds, pred_scores):
+                    fo.write(f"{pred}\t{score}\n")
+
+        predictions = {pred_key: set([pred_val]) for pred_key, pred_val in zip(ids, preds)}
         if args.reader == 'SemcorReader':
             if args.use_pwn:
                 gold = parse_file(args.input_file.replace('data.xml', 'gold.key.txt'))
                 data_id = args.input_file.split('/')[-1]
-                #for d in os.listdir(f'{ev_dir}/Evaluation_Datasets'):
-                #if not os.path.isdir(f'{ev_dir}/Evaluation_Datasets/{d}'): continue
+                '''
+                G,P={},{}
+                sorted_ids = np.argsort(uncertainty_scores2)[::-1]
+                for idx, sid in enumerate(sorted_ids):
+                    G[ids[sid]] = gold[ids[sid]]
+                    P[ids[sid]] = predictions[ids[sid]]
+                    if len(G) % 250 == 0 and len(G) < 1000:
+                        f1 = evaluate_microF1(P, G)
+                        print(len(G), f1)
+                    if idx < 4 or idx > len(gold) - 4:
+                        print(idx, sid, ids[sid], uncertainty_scores2[sid], gold[ids[sid]], predictions[ids[sid]])
+                f1 = evaluate_microF1(P, G)
+                print(len(G), f1)
+                print("======================")
+                '''
+                G,P={},{}
+                score_sorted_ids = np.argsort(pred_scores)[::-1]
+                for idx, sid in enumerate(score_sorted_ids):
+                    G[ids[sid]] = gold[ids[sid]]
+                    P[ids[sid]] = predictions[ids[sid]]
+                    if len(G) % 250 == 0 and False:
+                        f1 = evaluate_microF1(G,P)
+                        f1_macro = evaluate_macroF1(G,P)
+                        score_cutoff = pred_scores[sid]
+                        print(f'{data_id}\t{len(P)}\t{len(preds)}\t{TAB.join(map(str, params))}\t{f1:.4f}\t{f1_macro:.4f}\t{score_cutoff}\t{model_name}')
 
                 #tmp_pred_file = f'{np.abs(hash(model_name))}_tmp.key'
                 #ev.print_predictions(tmp_pred_file, ids, preds, d)
@@ -378,9 +448,9 @@ def main():
                 #p_r_f = result.decode('utf-8').split()
                 #prf = '\t'.join([p_r_f[i].replace('%', '') for i in [1,3,5]])
 
-                f1 = evaluate_microF1(predictions, gold)
-                f1_macro = evaluate_macroF1(predictions, gold)
-                print(f'{data_id}\t{len(preds)}\t{TAB.join(map(str, params))}\t{f1:.4f}\t{f1_macro:.4f}\t{model_name}')
+                f1 = evaluate_microF1(G,P)
+                f1_macro = evaluate_macroF1(G,P)
+                print(f'{data_id}\t{len(P)}\t{len(preds)}\t{TAB.join(map(str, params))}\t{f1:.4f}\t{f1_macro:.4f}\t{pred_scores[sid]}\t{model_name}')
                 #os.remove(tmp_pred_file)
                 #print("================")
             else:

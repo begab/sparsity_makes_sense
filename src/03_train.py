@@ -41,6 +41,10 @@ def main():
     parser.add_argument('--not-pairs', dest='pairs', action='store_false')
     parser.set_defaults(pairs=False)
 
+    parser.add_argument('--binarize', dest='binarize', action='store_true', help='Whether to only consider the activation')
+    parser.add_argument('--not-binarize', dest='binarize', action='store_false')
+    parser.set_defaults(binarize=False)
+    
     parser.add_argument('--lexname', dest='senseid', action='store_false')
     parser.add_argument('--senseid', dest='senseid', action='store_true')
     parser.set_defaults(senseid=True)
@@ -80,6 +84,8 @@ def main():
                 M = M @ D.T
             elif D is None and args.pairs:
                 M = transform_atoms(M, weight=True, use_singletons=True, use_pairs=True)
+            if args.binarize and type(M)!=np.ndarray:
+                M.data = np.ones_like(M.data)
 
         elif rep.endswith('.npy'):
             M = np.load(rep)
@@ -89,7 +95,9 @@ def main():
             labels = token[0 if args.senseid else 1]
             vec = None
             if not args.reduced or (args.reduced and len(labels) > 0):
-                vec = M[idx] / (M[idx].sum() if args.norm and M[idx].sum() > 0 else 1.0)
+                vec = M[idx]
+                if args.binarize==False:
+                    vec /= (vec.sum() if args.norm and vec.sum() > 0 else 1.0)
                 idx += 1
             else:
                 continue
@@ -118,7 +126,7 @@ def main():
 
         #model_file_name = '__'.join([os.path.basename(fn) for fn in args.representations])
         #with open('models/{model_file_name}.pickle', 'wb') as f:
-        with open(f'{args.out_dir}/{os.path.basename(rep)}{"_norm" if args.norm else ""}_D{D is not None}{"_pair" if args.pairs else ""}.pickle', 'wb') as fo:
+        with open(f'{args.out_dir}/{os.path.basename(rep)}{"_norm" if args.norm else ""}_D{D is not None}{"_bin" if args.binarize else ""}{"_pair" if args.pairs else ""}.pickle', 'wb') as fo:
             pickle.dump((labels_to_ids, labels_to_freq, mtx), fo)
 
 
