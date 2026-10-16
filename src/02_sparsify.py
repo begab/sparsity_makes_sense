@@ -18,7 +18,7 @@ logging.config.dictConfig({
     'disable_existing_loggers': True,
 })
 
-def calc_inconsistency(X):
+def calc_incoherence(X):
     return np.triu(np.abs(X.T @ X), k=1).max()
 
 if __name__ == '__main__':
@@ -121,8 +121,8 @@ if __name__ == '__main__':
             logging.info(f'Random dictionary generated using {dict_file}.')
 
         D = np.load(f'{dict_file}.npy')
-        inconsistency = calc_inconsistency(D)
-        logging.info((D.dtype, embeddings.dtype, D.shape, embeddings.shape, inconsistency))
+        incoherence = calc_incoherence(D)
+        logging.info((D.dtype, embeddings.dtype, D.shape, embeddings.shape, incoherence))
        
         args.K = D.shape[1] 
         alphas_file = f'{dict_file}_{args.short_alphas_name if args.short_alphas_name else os.path.basename(in_file)}_norm{args.normalize}_K{args.K}_lda{args.lda}'

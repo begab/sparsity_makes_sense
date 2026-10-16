@@ -114,27 +114,115 @@ def calculate_column_norms(sparse_matrix):
         squared_norms[s] += value**2
     return {k:np.sqrt(v) for k,v in squared_norms.items()}
 
-
-def transform_atoms(M, weight=True, use_singletons=True, use_pairs=True):
+def transform_atoms(M, weight=True, use_singletons=True, use_pairs=True, combine='geometric'):
     assert use_singletons or use_pairs
 
     if weight==False:
         M.data = np.ones_like(M.data)
 
     num_samples, num_atoms = M.shape
-    if use_singletons and not use_pairs:
-        filter_fun = lambda x: x[0][0]==x[1][0]
-    elif use_singletons:
-        filter_fun = lambda x: x[0][0]>=x[1][0]
+    if use_singletons is True and not use_pairs is True:
+        filter_fn = lambda x: x[0][0]==x[1][0]
+    elif use_singletons is True:
+        filter_fn = lambda x: x[0][0]>=x[1][0]
     else:
-        filter_fun = lambda x: x[0][0]>x[1][0]
+        filter_fn = lambda x: x[0][0]>x[1][0]
+
+    if combine.lower()=='harmonic':
+        combine_fn = lambda a,b: 2*a*b / (a+b)
+    else:
+        combine_fn = lambda a,b: a*b
 
     data, indices, indptrs = [], [], [0]
-    for sid in tqdm(range(num_samples), ncols=100, desc='Transform atoms'):
+    for sid in tqdm(range(num_samples), ncols=100, desc='Trafo'):
 
         z = list(zip(M[sid].indices, M[sid].data))
-        for (ind1, val1),(ind2, val2) in filter(filter_fun, itertools.product(z,z)):
-            data.append(val1 * val2)
+        for (ind1, val1),(ind2, val2) in filter(filter_fn, itertools.product(z,z)):
+            data.append(combine_fn(val1, val2))
+            #data.append(val1*val2)
             indices.append(ind2 * num_atoms + ind1)
         indptrs.append(len(data))
+    if combine=='geometric':
+        data = np.sqrt(data)
     return scipy.sparse.csr_matrix((data, indices, indptrs), shape=(num_samples, num_atoms **2))
+
+
+def rowwise_kron_symmetric(A, weight=True, combine='geometric'):
+
+    A.eliminate_zeros()
+    if weight==False:
+        A.data = np.ones_like(A.data)
+
+    num_samples, num_atoms = A.shape
+
+    lengths = np.diff(A.indptr)
+    out_lengths = lengths**2
+
+    new_indptr = np.empty(num_samples + 1, dtype=np.int64)
+    new_indptr[0] = 0
+    np.cumsum(out_lengths, out=new_indptr[1:])
+
+    total = int(new_indptr[-1])
+
+    data_out = np.empty(total, dtype=A.data.dtype)
+    indices_out = np.empty(total, dtype=np.int64)
+
+    for i in tqdm(range(num_samples), ncols=100, desc='Fast symmetric Kronecker product'):
+        start, end = A.indptr[i:i+2]
+        idx = A.indices[start:end]
+        dat = A.data[start:end]
+
+        out_start, out_end = new_indptr[i:i+2]
+
+        data_out[out_start:out_end] = np.multiply.outer(dat, dat).ravel()
+        if combine=='harmonic':
+            data_out[out_start:out_end] = 2 *  data_out[out_start:out_end] / np.add.outer(dat, dat).ravel()
+
+        indices_out[out_start:out_end] = (idx[:, None] * num_atoms + idx[None, :]).ravel()
+
+    if combine=='geometric':
+        data_out = np.sqrt(data_out)
+    return scipy.sparse.csr_matrix((data_out, indices_out, new_indptr), shape=(num_samples, num_atoms*num_atoms))
+
+def rowwise_kron(A, weight=True, use_singletons=True, use_pairs=True, combine='geometric'):
+    """
+    This version gets rid of redundant computation (i.e., (i,j) and (j,i) index pairs)
+    """
+    A.eliminate_zeros()
+    if weight==False:
+        A.data = np.ones_like(A.data)
+
+    num_samples, num_atoms = A.shape
+
+    lengths = np.diff(A.indptr)
+    out_lengths = (lengths * (lengths - 1)) // 2
+    if use_singletons is True:
+        out_lengths += lengths
+
+    new_indptr = np.empty(num_samples + 1, dtype=np.int64)
+    new_indptr[0] = 0
+    np.cumsum(out_lengths, out=new_indptr[1:])
+
+    total = int(new_indptr[-1])
+
+    data_out = np.empty(total, dtype=A.data.dtype)
+    indices_out = np.empty(total, dtype=np.int64)
+
+    for i in range(num_samples):
+        start, end = A.indptr[i:i+2]
+        idx = A.indices[start:end]
+        dat = A.data[start:end]
+
+        out_start, out_end = new_indptr[i:i+2]
+        relevant_i, relevant_j = np.triu_indices(len(dat), k=0 if use_singletons else 1)
+        x, y = dat[relevant_i], dat[relevant_j]
+
+        data_out[out_start:out_end] = x * y
+        if combine=='harmonic':
+            data_out[out_start:out_end] = 2 *  data_out[out_start:out_end] / (x + y)
+
+        indices_out[out_start:out_end] = idx[relevant_i] * num_atoms + idx[relevant_j]
+
+    if combine=='geometric':
+        data_out = np.sqrt(data_out)
+    return scipy.sparse.csr_matrix((data_out, indices_out, new_indptr), shape=(num_samples, num_atoms*num_atoms))

@@ -1,6 +1,6 @@
 import os, sys
 import pickle
-from utils.utils import transform_atoms
+from utils.utils import rowwise_kron #transform_atoms
 from utils.readers import *
 
 import numpy as np
@@ -37,9 +37,7 @@ def main():
     parser.add_argument('--not-reduced', dest='reduced', action='store_false')
     parser.set_defaults(reduced=False)
 
-    parser.add_argument('--pairs', dest='pairs', action='store_true', help='Whether to use sparse atom pairs')
-    parser.add_argument('--not-pairs', dest='pairs', action='store_false')
-    parser.set_defaults(pairs=False)
+    parser.add_argument('--pairs', help='Whether to use sparse atom pairs', type=str.lower, choices=['none', 'harmonic', 'geometric', 'prod'], default='none')
 
     parser.add_argument('--binarize', dest='binarize', action='store_true', help='Whether to only consider the activation')
     parser.add_argument('--not-binarize', dest='binarize', action='store_false')
@@ -82,8 +80,8 @@ def main():
             logging.info(M.shape)
             if D is not None:
                 M = M @ D.T
-            elif D is None and args.pairs:
-                M = transform_atoms(M, weight=True, use_singletons=True, use_pairs=True)
+            elif D is None and args.pairs != 'none':
+                M = rowwise_kron(M, weight=True, use_singletons=True, use_pairs=True, combine=args.pairs)
             if args.binarize and type(M)!=np.ndarray:
                 M.data = np.ones_like(M.data)
 
@@ -126,7 +124,8 @@ def main():
 
         #model_file_name = '__'.join([os.path.basename(fn) for fn in args.representations])
         #with open('models/{model_file_name}.pickle', 'wb') as f:
-        with open(f'{args.out_dir}/{os.path.basename(rep)}{"_norm" if args.norm else ""}_D{D is not None}{"_bin" if args.binarize else ""}{"_pair" if args.pairs else ""}.pickle', 'wb') as fo:
+        out_file_suffix = f"_{args.pairs}" if args.pairs else ""
+        with open(f'{args.out_dir}/{os.path.basename(rep)}{"_norm" if args.norm else ""}_D{D is not None}{"_bin" if args.binarize else ""}{out_file_suffix}.pickle', 'wb') as fo:
             pickle.dump((labels_to_ids, labels_to_freq, mtx), fo)
 
 

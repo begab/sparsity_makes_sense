@@ -8,7 +8,7 @@ from tqdm.auto import tqdm
 from utils.readers import *
 from utils.evaluate_answers import parse_file, evaluate
 from utils.evaluate_F1 import evaluate_microF1, evaluate_macroF1
-from utils.utils import row_normalize, get_synsets, create_batch, transform_atoms
+from utils.utils import row_normalize, get_synsets, create_batch, rowwise_kron #transform_atoms
 
 import numpy as np
 import scipy.sparse
@@ -157,9 +157,7 @@ def main():
     parser.add_argument('--not-reduced', dest='reduced', action='store_false')
     parser.set_defaults(reduced=False)
 
-    parser.add_argument('--pairs', dest='pairs', action='store_true', help='Whether to use sparse atom pairs')
-    parser.add_argument('--not-pairs', dest='pairs', action='store_false')
-    parser.set_defaults(pairs=False)
+    parser.add_argument('--pairs', help='Whether to use sparse atom pairs', type=str.lower, choices=['none', 'harmonic', 'geometric', 'prod'], default='none')
 
     parser.add_argument('--gpu_id', type=int, default=0)
 
@@ -217,7 +215,7 @@ def main():
     reader = klass()
 
     pairwise_pmis = None
-    if args.pairs and args.sparse_training_reps is not None:
+    if args.pairs != 'none' and args.sparse_training_reps is not None:
         A = scipy.sparse.vstack([scipy.sparse.load_npz(inp) for inp in args.sparse_training_reps])
         A.data = np.ones_like(A.data)
 
@@ -306,8 +304,8 @@ def main():
         if D is not None:
             R = R @ D.T
 
-    if args.pairs:
-        R = transform_atoms(R, weight=args.weight, use_singletons=True, use_pairs=True)
+    if args.pairs != 'none':
+        R = rowwise_kron(R, weight=args.weight, use_singletons=True, use_pairs=True, combine=args.pairs)
         if args.weight==False:
             R.data = np.ones_like(R.data)
 
@@ -398,10 +396,9 @@ def main():
                 uscore = pairwise_pmis @ vec.todense().T
                 uncertainty_scores2.append(uscore[0,0])
 
-        #pred_file = args.pred_file_location if args.pred_file_location is not None else np.abs(hash(model_name))
-        args.pred_file_location = None #'_'.join([os.path.basename(mi) for mi in [args.input_file] + args.model_inputs])
         logging.info(args.pred_file_location)
         if args.pred_file_location is not None:
+            args.pred_file_location = '_'.join([os.path.basename(mi) for mi in [args.input_file] + args.model_inputs])
             prefix = '_'.join(list(map(str, params)))
             out_file_name = f'{prefix}_{args.pred_file_location}'
             hashed_file_name = hashlib.sha256(out_file_name.encode("utf-8")).hexdigest()
